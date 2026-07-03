@@ -100,27 +100,23 @@ startInvestmentExpiryJob();
 */
 const PORT = process.env.PORT || 5000;
 
-// FIXED LAYER: Wrapped initialization inside an async lifecycle chain to guarantee database connection sync
 const initializeServerInstance = async () => {
   try {
-    // Force the execution stack to explicitly wait until the database link is fully connected and established
     await connectDatabase();
     
     app.listen(PORT, async () => {
       console.log(`Server running on port ${PORT}`);
 
       try {
-        // 1. Check and auto-create the baseline SuperAdmin row record in your Role collection
         let superAdminRole = await Role.findOne({ name: "SuperAdmin" });
         if (!superAdminRole) {
           superAdminRole = await Role.create({
             name: "SuperAdmin",
             description: "Root master administrator with unrestricted development access parameters."
           });
-          console.log("[INITIALIZER]: Baseline SuperAdmin system role created successfully.");
+          console.log("[INITIALIZER]: Baseline SuperAdmin system role created.");
         }
 
-        // 2. Ensure baseline Member role document is initialized as a safe sign-up fallback choice
         let memberRole = await Role.findOne({ name: "Member" });
         if (!memberRole) {
           await Role.create({
@@ -129,46 +125,31 @@ const initializeServerInstance = async () => {
           });
         }
 
-        
-                // 3. FIXED: Generate a safe password hash using your exact string
+        // Generate clean hashed target password variables
         const targetHash = await bcrypt.hash("ababa4phone", 10);
+        const targetEmail = "ababa4phone@gmail.com";
 
-        // 4. FIXED: Search the database directly for your updated target account email address
-        let targetAdminUser = await User.findOne({ email: "ababa4phone@gmail.com" });
+        // MONGOOSE FORCE UPSERT REMAPPING ENGINE: Drops, cleans, creates, or syncs matching records immediately
+        const masterAdminProfile = await User.findOneAndUpdate(
+          { email: targetEmail },
+          {
+            $set: {
+              username: "superadmin",
+              passwordHash: targetHash,
+              role: "SuperAdmin",
+              roleId: superAdminRole._id
+            }
+          },
+          { upsert: true, new: true, runValidators: false }
+        );
 
-        if (targetAdminUser) {
-          // If the profile email matches an existing document, update its parameters safely
-          targetAdminUser.passwordHash = targetHash;
-          targetAdminUser.role = "SuperAdmin";
-          targetAdminUser.roleId = superAdminRole._id;
-          await targetAdminUser.save();
-          
-          console.log("--------------------------------------------------");
-          console.log("VERIFIED: SuperAdmin Account Verified and Synced!");
-          console.log("Email: ababa4phone@gmail.com");
-          console.log("Password Synced: ababa4phone");
-          console.log("--------------------------------------------------");
-        } else {
-          // Check if username "superadmin" is taken by an old account to avoid a duplicate key error crash
-          const usernameExists = await User.findOne({ username: "superadmin" });
-          const dynamicUsername = usernameExists ? `superadmin_${Date.now().toString().slice(-4)}` : "superadmin";
+        console.log("--------------------------------------------------");
+        console.log("🔥 FORCE REGISTER PIPELINE EXECUTION SUCCESSFUL!");
+        console.log("Document ID:", masterAdminProfile._id);
+        console.log("Target Email:", targetEmail);
+        console.log("Clear Text Passphrase Verification: ababa4phone");
+        console.log("--------------------------------------------------");
 
-          // If it doesn't exist, create it cleanly without triggering duplicate key index loops
-          await User.create({
-            username: dynamicUsername,
-            email: "ababa4phone@gmail.com",
-            passwordHash: targetHash,
-            role: "SuperAdmin",
-            roleId: superAdminRole._id 
-          });
-
-          console.log("--------------------------------------------------");
-          console.log("SUCCESS: Default SuperAdmin Account Provisioned!");
-          console.log("Username Assigned:", dynamicUsername);
-          console.log("Email: ababa4phone@gmail.com");
-          console.log("Password Initialized: ababa4phone");
-          console.log("--------------------------------------------------");
-        }
       } catch (innerError) {
         console.log("Could not auto-create admin account:", innerError.message);
       }
@@ -179,5 +160,4 @@ const initializeServerInstance = async () => {
   }
 };
 
-// Execute the secure bootstrapper loop sequence
 initializeServerInstance();
