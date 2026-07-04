@@ -43,7 +43,7 @@ const app = express();
 
 // FIXED CORS LAYER: Replaces generic origin checking with an explicit white-list rule for Netlify
 app.use(cors({
-  origin: "https://netlify.app",
+  origin: "https://namasge-family.netlify.app",
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
