@@ -41,9 +41,11 @@ dotenv.config();
 
 const app = express();
 
-// FIXED CORS LAYER: Replaces generic origin checking with an explicit white-list rule for Netlify
+// OPEN GATEWAY PIPELINE: Completely removes origin constraints so Netlify can connect instantly
 app.use(cors({
-  origin: "https://namasge-family.netlify.app",
+  origin: function(origin, callback){
+    return callback(null, true);
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
