@@ -41,8 +41,13 @@ dotenv.config();
 
 const app = express();
 
-// Enable connections from frontend
-app.use(cors({ origin: true, credentials: true })); 
+// FIXED CORS LAYER: Replaces generic origin checking with an explicit white-list rule for Netlify
+app.use(cors({
+  origin: "https://netlify.app",
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+})); 
 app.use(express.json());
 
 /*
