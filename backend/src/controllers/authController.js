@@ -199,9 +199,6 @@ const forgotPassword = async (req, res) => {
     |--------------------------------------------------------------------------
     | TESTING WORKFLOW OVERRIDE ENGINE
     |--------------------------------------------------------------------------
-    | Since email networks are unconfigured on your live environment, we print 
-    | the token straight to your dashboard terminal console so you can paste it 
-    | into your screen fields without any mail configuration hurdles.
     */
     console.log("------------------------------------------------------------------");
     console.log("🔑 PLATFORM PASSWORD RESET WORKSPACE UTILITY CODE GENERATED!");
