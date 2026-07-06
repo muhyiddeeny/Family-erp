@@ -33,7 +33,7 @@ const getAnalytics = async (req, res) => {
     const aggregationResult = await Member.aggregate([
       {
         $group: {
-          id: null,
+          _id: null,
           // Education Tallies (Evaluates dynamically if fields exist/are true)
           diploma: { $sum: { $cond: [{ $eq: ["$diploma", "Yes"] }, 1, 0] } },
           nce: { $sum: { $cond: [{ $eq: ["$nce", "Yes"] }, 1, 0] } },
@@ -56,10 +56,7 @@ const getAnalytics = async (req, res) => {
 
           // Push arrays for dynamic key-value clustering (States, Occupations, etc.)
           states: { $push: { $ifNull: ["$state", "Unknown"] } },
-          
-          // COMPATIBILITY INTERFACE LAYER: Point directly to your true database field name 'occupationCategory'
           occupations: { $push: { $ifNull: ["$occupationCategory", "Unknown"] } },
-          
           maritalStatuses: { $push: { $ifNull: ["$maritalStatus", "Unknown"] } },
           interests: { $push: { $ifNull: ["$opportunityInterest", "Unknown"] } }
         }
@@ -78,7 +75,7 @@ const getAnalytics = async (req, res) => {
     const clusterData = (arr = []) => {
       if (!Array.isArray(arr)) return {};
       return arr.reduce((acc, val) => {
-        acc[val] = (acc[val] || 0) + 1;
+        if (val) acc[val] = (acc[val] || 0) + 1;
         return acc;
       }, {});
     };
@@ -87,24 +84,26 @@ const getAnalytics = async (req, res) => {
     |--------------------------------------------------------------------------
     | MULTI-SELECT CHECKBOX SPLITTING TALLY RECONCILER
     |--------------------------------------------------------------------------
-    | Separates comma-spaced string elements into standalone, clean sector 
-    | names so individuals who check multiple industries get tallied accurately.
     */
     const parseOccupationSectorArrayData = (rawStringArray = []) => {
       const consolidatedTallySummary = {};
+      if (!Array.isArray(rawStringArray)) return consolidatedTallySummary;
       
       rawStringArray.forEach(entry => {
-        if (!entry || entry === "Unknown") {
+        // FIXED SAFETY LAYER: Instantly intercept and handle empty, null, or undefined data properties safely
+        if (!entry || typeof entry !== "string" || entry === "Unknown") {
           consolidatedTallySummary["Unknown"] = (consolidatedTallySummary["Unknown"] || 0) + 1;
           return;
         }
         
-        // Break compound entries like "Farmer, Artisan" into individual words
+        // Break compound entries like "Farmer, Artisan" into individual words safely
         const splitTokens = entry.split(", ");
         splitTokens.forEach(token => {
-          const cleanTokenName = token.trim();
-          if (cleanTokenName) {
-            consolidatedTallySummary[cleanTokenName] = (consolidatedTallySummary[cleanTokenName] || 0) + 1;
+          if (token) {
+            const cleanTokenName = token.trim();
+            if (cleanTokenName) {
+              consolidatedTallySummary[cleanTokenName] = (consolidatedTallySummary[cleanTokenName] || 0) + 1;
+            }
           }
         });
       });
@@ -115,14 +114,6 @@ const getAnalytics = async (req, res) => {
     // COMPATIBILITY INTERFACE LAYER: Map fields so frontend destructuring keys always match up
     return res.status(200).json({
       success: true,
-      data: {
-        totalMembers,
-        houses,
-        totalInvestmentVolume: 0, 
-        totalFamilyShareVolume: 0, 
-        totalDonationVolume: 0, 
-        totalDonationsCount: donations
-      },
       summaryCards: {
         totalMembers,
         houses,
@@ -155,10 +146,7 @@ const getAnalytics = async (req, res) => {
         totalJuzWritten: metrics.totalJuzWritten || 0
       },
       locationAnalytics: clusterData(metrics.states),
-      
-      // FIXED LAYER: Replaces old clusterData to accurately split and tally checkboxes
       occupationAnalytics: parseOccupationSectorArrayData(metrics.occupations),
-      
       maritalAnalytics: clusterData(metrics.maritalStatuses),
       opportunityAnalytics: clusterData(metrics.interests)
     });
