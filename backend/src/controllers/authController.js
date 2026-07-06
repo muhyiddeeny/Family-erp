@@ -1,9 +1,9 @@
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto"); // FIXED LAYER: Import crypto utility engine to generate secure token parameters
+const crypto = require("crypto"); 
 const User = require("../models/User");
 const Role = require("../models/Role"); 
 const generateToken = require("../utils/generateToken");
-const { createAuditLog } = require("./auditLogController"); // FIXED LAYER: Link logs hook to track recovery events
+const { createAuditLog } = require("./auditLogController"); 
 
 /*
 |--------------------------------------------------------------------------
@@ -22,7 +22,10 @@ const register = async (req, res) => {
     }
 
     const existingUser = await User.findOne({
-      $or: [{ email }, { username }]
+      $or: [
+        { email: email.trim().toLowerCase() }, 
+        { username: username.trim().toLowerCase() }
+      ]
     });
 
     if (existingUser) {
@@ -45,8 +48,8 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await User.create({
-      username,
-      email,
+      username: username.trim().toLowerCase(),
+      email: email.trim().toLowerCase(),
       passwordHash,
       role: targetRoleName,
       roleId: roleDocument._id
@@ -90,7 +93,8 @@ const login = async (req, res) => {
       });
     }
 
-    const user = await User.findOne({ email });
+    // FIXED STRATEGY LAYER: Sanitizes variations in input text casing to find your records cleanly
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
 
     if (!user) {
       return res.status(401).json({
@@ -175,19 +179,15 @@ const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) {
-      // SECURITY GUARD: Return 200 success even if user doesn't exist to prevent email enumeration hacks
       return res.status(200).json({ success: true, message: "If account exists, token recovery code has been generated." });
     }
 
-    // Generate hexadecimal string token parameters
     const resetToken = crypto.randomBytes(20).toString("hex");
     
-    // Hash token and assign 10 minute short-lived window parameters
     user.resetPasswordToken = crypto.createHash("sha256").update(resetToken).digest("hex");
     user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; 
     await user.save();
 
-    // SERVER AUDIT FOOTPRINT: Logs access token generation
     await createAuditLog({
       userId: user._id,
       module: "Authentication",
@@ -195,11 +195,6 @@ const forgotPassword = async (req, res) => {
       newValue: `Expires in 10 minutes. Plain text debug token: ${resetToken}`
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | TESTING WORKFLOW OVERRIDE ENGINE
-    |--------------------------------------------------------------------------
-    */
     console.log("------------------------------------------------------------------");
     console.log("🔑 PLATFORM PASSWORD RESET WORKSPACE UTILITY CODE GENERATED!");
     console.log(`Target Email account: ${user.email}`);
@@ -209,7 +204,7 @@ const forgotPassword = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Recovery key code generated successfully inside server environment maps. Check logs or mail vectors.",
-      debugToken: resetToken // Temporary access link shortcut handle for local client forms testing
+      debugToken: resetToken 
     });
 
   } catch (error) {
@@ -229,19 +224,17 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ success: false, message: "Token key and new passphrase fields are required." });
     }
 
-    // Encrypt incoming token to compare against database hash values
     const encryptedToken = crypto.createHash("sha256").update(token.trim()).digest("hex");
 
     const user = await User.findOne({
       resetPasswordToken: encryptedToken,
-      resetPasswordExpires: { $gt: Date.now() } // Verify time parameter boundary constraints
+      resetPasswordExpires: { $gt: Date.now() } 
     });
 
     if (!user) {
       return res.status(400).json({ success: false, message: "Invalid access token key or recovery timeframe has expired." });
     }
 
-    // Overwrite ancient credentials with fresh encrypted hash variables
     user.passwordHash = await bcrypt.hash(newPassword, 10);
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
