@@ -52,6 +52,18 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: {
       type: Date,
       default: null
+    },
+
+    // FIXED SECURITY LAYER: Token string parameters used to validate safe password reset workflows
+    resetPasswordToken: {
+      type: String,
+      default: null
+    },
+
+    // EXPIRY SECURE TIMESTAMPS: Automatically invalidates short-lived reset access keys
+    resetPasswordExpires: {
+      type: Date,
+      default: null
     }
   },
   {
