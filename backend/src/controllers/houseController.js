@@ -21,9 +21,9 @@ const getAllHouses = async (req, res) => {
     // 1. Fetch houses from the database
     let houses = await House.find().populate("members", "firstName surname email role");
 
-    // 2. PRIVACY ENFORCEMENT LAYER: Hide WhatsApp links if the user is not an Admin or SuperAdmin
+    // 2. PRIVACY ENFORCEMENT LAYER: FIXED to explicitly include HouseAdmin alongside Admin and SuperAdmin
     const userRole = req.user?.role;
-    const isAdmin = userRole === "Admin" || userRole === "SuperAdmin";
+    const isAdmin = userRole === "Admin" || userRole === "SuperAdmin" || userRole === "HouseAdmin";
 
     if (!isAdmin) {
       // Find the explicit house id assigned to this logged-in member
@@ -34,7 +34,7 @@ const getAllHouses = async (req, res) => {
         const houseObj = house.toObject();
         // If it's not their assigned house, strip the private WhatsApp community link entirely
         if (houseObj._id.toString() !== assignedHouseId) {
-          delete houseObj.whatsappLink; // Adjust key name to match your exact House schema field
+          delete houseObj.whatsappLink; 
         }
         return houseObj;
       });
@@ -55,11 +55,28 @@ const getAllHouses = async (req, res) => {
 
 const updateHouse = async (req, res) => {
   try {
+    // 3. ROLE COMPATIBILITY LAYER: Explicitly confirm client token payload role permission before mutating fields
+    const userRole = req.user?.role;
+    if (userRole !== "SuperAdmin" && userRole !== "Admin" && userRole !== "HouseAdmin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access Denied: You do not have permission to update house properties."
+      });
+    }
+
     const house = await House.findByIdAndUpdate(
       req.params.id,
       req.body,
-      { new: true }
+      { new: true, runValidators: true }
     );
+
+    if (!house) {
+      return res.status(404).json({
+        success: false,
+        message: "Target house entity record not found."
+      });
+    }
+
     return res.status(200).json({
       success: true,
       house
@@ -108,18 +125,18 @@ const assignMemberToHouse = async (req, res) => {
       });
     }
 
-    // 3. FIXED RELATIONSHIP LAYER: Remove member from their previous house array list if it exists
+    // FIXED RELATIONSHIP LAYER: Remove member from their previous house array list if it exists
     if (member.houseId && member.houseId.toString() !== targetHouseId) {
       await House.findByIdAndUpdate(member.houseId, {
         $pull: { members: member._id }
       });
     }
 
-    // 4. Update the Member's internal house target pointer link reference
+    // Update the Member's internal house target pointer link reference
     member.houseId = house._id;
     await member.save();
 
-    // 5. Add Member to the new target house array securely without duplication collisions
+    // Add Member to the new target house array securely without duplication collisions
     if (!house.members.includes(member._id)) {
       house.members.push(member._id);
       await house.save();
