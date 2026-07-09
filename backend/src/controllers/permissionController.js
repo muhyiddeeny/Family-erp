@@ -1,4 +1,5 @@
 const Permission = require("../models/Permission");
+const Role = require("../models/Role"); // FIXED LAYER: Import your dynamic Role collection schema model
 const { createAuditLog } = require("./auditLogController");
 
 const createPermission = async (req, res) => {
@@ -12,7 +13,6 @@ const createPermission = async (req, res) => {
       });
     }
 
-    // 1. FIXED LAYER: Case-insensitive duplicate check using a regex pattern match
     const existing = await Permission.findOne({
       name: { $regex: `^${name.trim()}$`, $options: "i" }
     });
@@ -30,7 +30,6 @@ const createPermission = async (req, res) => {
       description
     });
 
-    // 2. Commit system permission alteration block to the security ledger
     await createAuditLog({
       userId: req.user?._id,
       module: "Permissions & Authorization",
@@ -71,7 +70,31 @@ const getPermissions = async (req, res) => {
   }
 };
 
+/*
+|--------------------------------------------------------------------------
+| FIXED LAYER: FETCH DYNAMIC ACTIVE ROLES SYSTEM LOGIC
+|--------------------------------------------------------------------------
+| Queries your database, gathers all custom administrator titles, and ships 
+| them back to your management view tables to resolve your 404 connection drops.
+*/
+const getRoles = async (req, res) => {
+  try {
+    const roles = await Role.find().sort({ name: 1 });
+    return res.status(200).json({
+      success: true,
+      count: roles.length,
+      roles
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 module.exports = {
   createPermission,
-  getPermissions
+  getPermissions,
+  getRoles // FIXED LAYER: Exporting the missing controller function handle
 };
