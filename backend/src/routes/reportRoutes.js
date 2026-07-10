@@ -10,9 +10,6 @@ const {
 const { protect } = require("../middlewares/authMiddleware"); 
 const authorize = require("../middlewares/roleMiddleware"); 
 
-// DYNAMIC MODEL LINK: Explicitly load your active collection mapping layout to manipulate records directly
-const BusinessReport = require("../models/BusinessReport"); 
-
 const router = express.Router();
 
 /*
@@ -33,36 +30,8 @@ router.get("/employment/pdf", protect, authorize("SuperAdmin", "BusinessAdmin"),
 router.get("/donations/pdf", protect, authorize("SuperAdmin", "DonationAdmin"), donationReport);
 
 // FIXED LAYERS: Master Treasury & Global Summary Matrix Reports
+// Maps both route paths explicitly to handle incoming client download triggers cleanly
 router.get("/analytics/pdf", protect, authorize("SuperAdmin", "BusinessAdmin"), analyticsReport);
 router.get("/treasury/pdf", protect, authorize("SuperAdmin", "BusinessAdmin"), analyticsReport);
-
-/*
-|--------------------------------------------------------------------------
-| FIXED LAYER: INTEGRATED BUSINESS OPERATIONAL REPORTS ROUTE MATRIX
-|--------------------------------------------------------------------------
-| Resolves the 404 Not Found error explicitly by exposing data channels 
-| to capture and stream historical records to your Investments dashboard grids.
-*/
-router.get("/business-reports", protect, authorize("SuperAdmin", "BusinessAdmin"), async (req, res) => {
-  try {
-    const reports = await BusinessReport.find().sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, reports });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-router.post("/business-reports", protect, authorize("SuperAdmin", "BusinessAdmin"), async (req, res) => {
-  try {
-    const { title, content } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ success: false, message: "Title and Content parameters are required." });
-    }
-    const report = await BusinessReport.create({ title, content });
-    return res.status(201).json({ success: true, message: "Operational status report filed successfully.", report });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-});
 
 module.exports = router;
