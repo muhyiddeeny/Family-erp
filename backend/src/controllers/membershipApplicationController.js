@@ -204,5 +204,3 @@ module.exports = {
   approveApplication,
   rejectApplication
 };
-
-/
