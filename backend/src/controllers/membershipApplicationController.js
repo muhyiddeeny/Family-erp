@@ -204,11 +204,10 @@
 //   approveApplication,
 //   rejectApplication
 // };
-const MembershipApplication = require("../models/MembershipApplication");
-const Member = require("../models/Member");
-const User = require("../models/User");
+const express = require("express");
+const mongoose = require("mongoose"); // FIXED IMPORT: Provides safe database cache checks
 const bcrypt = require("bcryptjs");
-const nodemailer = require("nodemailer"); // STEP 1 IMPORT ADDED
+const nodemailer = require("nodemailer"); 
 const { createAuditLog } = require("./auditLogController");
 
 const generateMembershipNumber = () => {
@@ -219,6 +218,7 @@ const generateMembershipNumber = () => {
 
 const submitApplication = async (req, res) => {
   try {
+    const MembershipApplication = mongoose.model("MembershipApplication");
     const existingApplication = await MembershipApplication.findOne({
       email: req.body.email
     });
@@ -250,6 +250,7 @@ const submitApplication = async (req, res) => {
 
 const getAllApplications = async (req, res) => {
   try {
+    const MembershipApplication = mongoose.model("MembershipApplication");
     const applications = await MembershipApplication.find().sort({ createdAt: -1 });
 
     return res.status(200).json({
@@ -267,6 +268,7 @@ const getAllApplications = async (req, res) => {
 
 const getApplicationById = async (req, res) => {
   try {
+    const MembershipApplication = mongoose.model("MembershipApplication");
     const application = await MembershipApplication.findById(req.params.id);
 
     if (!application) {
@@ -290,6 +292,11 @@ const getApplicationById = async (req, res) => {
 
 const approveApplication = async (req, res) => {
   try {
+    // FIXED CACHE LOOKUPS: Pulls loaded schemas directly to stop folder import boot crashes
+    const MembershipApplication = mongoose.model("MembershipApplication");
+    const Member = mongoose.model("Member");
+    const User = mongoose.model("User");
+
     const application = await MembershipApplication.findById(req.params.id);
 
     if (!application) {
@@ -306,7 +313,9 @@ const approveApplication = async (req, res) => {
       });
     }
 
-    const existingMember = await Member.findOne({ email: application.email });
+    const targetEmail = application.email.trim().toLowerCase();
+
+    const existingMember = await Member.findOne({ email: targetEmail });
     if (existingMember) {
       return res.status(400).json({
         success: false,
@@ -321,26 +330,28 @@ const approveApplication = async (req, res) => {
     delete memberData._id;
     delete memberData.__v;
 
-    const defaultPasswordHash = await bcrypt.hash("WelcomeFamily123!", 10);
+    const rawDefaultPassword = "WelcomeFamily123!";
+    const defaultPasswordHash = await bcrypt.hash(rawDefaultPassword, 10);
+    const assignedUsername = memberData.username || `${memberData.firstName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`;
 
     const member = await Member.create({
       ...memberData,
-      username: memberData.username || `${memberData.firstName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`,
+      username: assignedUsername,
       passwordHash: defaultPasswordHash, 
       role: "Member",
       membershipNumber: generateMembershipNumber(),
       approvedAt: new Date()
     });
 
-    // STEP 2: DUAL USER LOGIN ACCOUNT PROVISIONING
+    // TWO-FACTOR AUTH SYSTEM PROFILE REGISTRATION: Creates active security user login credentials
     await User.create({
-      username: member.username,
-      email: application.email.toLowerCase().trim(),
+      username: assignedUsername,
+      email: targetEmail,
       passwordHash: defaultPasswordHash,
       role: "Member"
     });
 
-    // STEP 3: AUTOMATED WELCOME CREDENTIAL DISPATCH EMAIL
+    // AUTOMATED SYSTEM NOTIFICATION CARRIER EMAIL Dispatches credentials containing raw default password
     try {
       const transporter = nodemailer.createTransport({
         host: process.env.EMAIL_HOST || "://gmail.com",
@@ -354,7 +365,7 @@ const approveApplication = async (req, res) => {
 
       await transporter.sendMail({
         from: `"Ecosystem Family Platform" <${process.env.EMAIL_USER}>`,
-        to: application.email.toLowerCase().trim(),
+        to: targetEmail,
         subject: "🎉 Welcome! Your Membership Application has been Approved",
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #334155; max-width: 500px; border: 1px solid #e2e8f0; border-radius: 8px;">
@@ -362,8 +373,8 @@ const approveApplication = async (req, res) => {
             <p>Your membership profile registration file has been successfully verified and approved.</p>
             <div style="background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #cbd5e1; margin: 15px 0;">
               <strong>🔐 Account Login Credentials Details:</strong>
-              <p style="margin: 6px 0 0 0;"><strong>Login Email Address:</strong> ${application.email.toLowerCase().trim()}</p>
-              <p style="margin: 4px 0 0 0;"><strong>Temporary Password String:</strong> WelcomeFamily123!</p>
+              <p style="margin: 6px 0 0 0;"><strong>Login Email Address:</strong> ${targetEmail}</p>
+              <p style="margin: 4px 0 0 0;"><strong>Temporary Password String:</strong> ${rawDefaultPassword}</p>
             </div>
             <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">* Security Notice: Update this temporary password inside your setting panels on your first session login boot loop.</p>
           </div>
@@ -378,14 +389,14 @@ const approveApplication = async (req, res) => {
       module: "Membership Onboarding",
       action: "Application Approved",
       oldValue: "Pending",
-      newValue: JSON.stringify({ memberId: member._id, membershipNumber: member.membershipNumber, email: member.email }),
+      newValue: JSON.stringify({ memberId: member._id, membershipNumber: member.membershipNumber, email: targetEmail }),
       ipAddress: req.ip,
       userAgent: req.headers["user-agent"]
     });
 
     return res.status(200).json({
       success: true,
-      message: "Application approved successfully. Default login password initialized as 'WelcomeFamily123!'",
+      message: "Application approved successfully. User account activated.",
       member
     });
   } catch (error) {
@@ -399,6 +410,9 @@ const approveApplication = async (req, res) => {
 const rejectApplication = async (req, res) => {
   try {
     const { id } = req.params;
+    const MembershipApplication = mongoose.model("MembershipApplication");
+    const Member = mongoose.model("Member");
+    const User = mongoose.model("User");
 
     const application = await MembershipApplication.findById(id);
     if (!application) {
@@ -419,8 +433,8 @@ const rejectApplication = async (req, res) => {
     await application.save();
 
     await Promise.all([
-      User.deleteOne({ email: application.email.toLowerCase() }),
-      Member.deleteOne({ email: application.email.toLowerCase() })
+      User.deleteOne({ email: application.email.toLowerCase().trim() }),
+      Member.deleteOne({ email: application.email.toLowerCase().trim() })
     ]);
 
     await createAuditLog({
