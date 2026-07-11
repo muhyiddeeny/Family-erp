@@ -168,7 +168,6 @@
 // };
 
 // initializeServerInstance();
-
 const express = require("express");
 const dotenv = require("dotenv");
 const cors = require("cors"); 
@@ -251,6 +250,10 @@ app.use("/api/business-categories", businessCategoryRoutes);
 app.use("/api/investment-projects", investmentProjectRoutes);
 app.use("/api/investment-rules", investmentRuleRoutes);
 app.use("/api/investment-applications", investmentApplicationRoutes);
+
+// FIXED RE-ROUTING LAYER: Links frontend '/api/investments' calls straight to your application router
+app.use("/api/investments", investmentApplicationRoutes);
+
 app.use("/api/investment-approvals", investmentApprovalRoutes);
 app.use("/api/investment-expiry-settings", investmentExpirySettingRoutes);
 app.use("/api/family-share-fund", familyShareFundRoutes);
