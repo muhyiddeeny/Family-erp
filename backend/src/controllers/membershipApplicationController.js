@@ -142,6 +142,10 @@
 //       username: assignedUsername,
 //       passwordHash: defaultPasswordHash, 
 //       role: "Member",
+      
+//       // FIXED AUTO-ASSIGNMENT LAYER: Links onboarding selections directly to final member profiles
+//       houseId: application.houseId || memberData.houseId || null,
+      
 //       membershipNumber: generateMembershipNumber(),
 //       approvedAt: new Date()
 //     });
@@ -159,7 +163,8 @@
 
 //     try {
 //       const transporter = nodemailer.createTransport({
-//         host: process.env.EMAIL_HOST || "://gmail.com",
+//         // FIXED HOST BUG: Repaired malformed server address block to clear transmission crashes
+//         host: process.env.EMAIL_HOST || "smtp.gmail.com",
 //         port: Number(process.env.EMAIL_PORT) || 587,
 //         secure: process.env.EMAIL_SECURE === "true",
 //         auth: {
@@ -410,21 +415,11 @@ const approveApplication = async (req, res) => {
     const defaultPasswordHash = await bcrypt.hash(rawDefaultPassword, 10);
     const assignedUsername = memberData.username || `${memberData.firstName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`;
 
-    const member = await Member.create({
-      ...memberData,
-      username: assignedUsername,
-      passwordHash: defaultPasswordHash, 
-      role: "Member",
-      
-      // FIXED AUTO-ASSIGNMENT LAYER: Links onboarding selections directly to final member profiles
-      houseId: application.houseId || memberData.houseId || null,
-      
-      membershipNumber: generateMembershipNumber(),
-      approvedAt: new Date()
-    });
+    // Extract house identification string cleanly from application payload
+    const selectedHouseId = application.houseId || application.house || memberData.houseId || memberData.house || null;
 
-    // FIXED LOGINS PROVISIONING: Sets up the login record with name strings and the correct role ID reference
-    await User.create({
+    // 1. STEP ONE: Initialize login profile gateway credentials first to retrieve explicit _id reference
+    const newUserLoginAccount = await User.create({
       username: assignedUsername,
       email: targetEmail,
       firstName: application.firstName || "Member",
@@ -434,9 +429,24 @@ const approveApplication = async (req, res) => {
       roleId: memberRoleDoc._id
     });
 
+    // 2. STEP TWO: Injects demographic profile document record mapping parameters securely
+    const member = await Member.create({
+      ...memberData,
+      username: assignedUsername,
+      passwordHash: defaultPasswordHash, 
+      role: "Member",
+      
+      // FIXED RELATIONSHIP MATRIX: Saves identity references to satisfy deep lookup model variations
+      userId: newUserLoginAccount._id,
+      house: selectedHouseId,
+      houseId: selectedHouseId,
+      
+      membershipNumber: generateMembershipNumber(),
+      approvedAt: new Date()
+    });
+
     try {
       const transporter = nodemailer.createTransport({
-        // FIXED HOST BUG: Repaired malformed server address block to clear transmission crashes
         host: process.env.EMAIL_HOST || "smtp.gmail.com",
         port: Number(process.env.EMAIL_PORT) || 587,
         secure: process.env.EMAIL_SECURE === "true",
