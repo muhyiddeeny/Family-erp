@@ -137,21 +137,11 @@
 //     const defaultPasswordHash = await bcrypt.hash(rawDefaultPassword, 10);
 //     const assignedUsername = memberData.username || `${memberData.firstName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`;
 
-//     const member = await Member.create({
-//       ...memberData,
-//       username: assignedUsername,
-//       passwordHash: defaultPasswordHash, 
-//       role: "Member",
-      
-//       // FIXED AUTO-ASSIGNMENT LAYER: Links onboarding selections directly to final member profiles
-//       houseId: application.houseId || memberData.houseId || null,
-      
-//       membershipNumber: generateMembershipNumber(),
-//       approvedAt: new Date()
-//     });
+//     // Extract house identification string cleanly from application payload
+//     const selectedHouseId = application.houseId || application.house || memberData.houseId || memberData.house || null;
 
-//     // FIXED LOGINS PROVISIONING: Sets up the login record with name strings and the correct role ID reference
-//     await User.create({
+//     // 1. STEP ONE: Initialize login profile gateway credentials first to retrieve explicit _id reference
+//     const newUserLoginAccount = await User.create({
 //       username: assignedUsername,
 //       email: targetEmail,
 //       firstName: application.firstName || "Member",
@@ -161,9 +151,24 @@
 //       roleId: memberRoleDoc._id
 //     });
 
+//     // 2. STEP TWO: Injects demographic profile document record mapping parameters securely
+//     const member = await Member.create({
+//       ...memberData,
+//       username: assignedUsername,
+//       passwordHash: defaultPasswordHash, 
+//       role: "Member",
+      
+//       // FIXED RELATIONSHIP MATRIX: Saves identity references to satisfy deep lookup model variations
+//       userId: newUserLoginAccount._id,
+//       house: selectedHouseId,
+//       houseId: selectedHouseId,
+      
+//       membershipNumber: generateMembershipNumber(),
+//       approvedAt: new Date()
+//     });
+
 //     try {
 //       const transporter = nodemailer.createTransport({
-//         // FIXED HOST BUG: Repaired malformed server address block to clear transmission crashes
 //         host: process.env.EMAIL_HOST || "smtp.gmail.com",
 //         port: Number(process.env.EMAIL_PORT) || 587,
 //         secure: process.env.EMAIL_SECURE === "true",
@@ -395,7 +400,6 @@ const approveApplication = async (req, res) => {
       });
     }
 
-    // Dynamic member role lookups
     let memberRoleDoc = await Role.findOne({ name: "Member" });
     if (!memberRoleDoc) {
       memberRoleDoc = await Role.create({
@@ -415,10 +419,14 @@ const approveApplication = async (req, res) => {
     const defaultPasswordHash = await bcrypt.hash(rawDefaultPassword, 10);
     const assignedUsername = memberData.username || `${memberData.firstName.toLowerCase()}${Math.floor(100 + Math.random() * 900)}`;
 
-    // Extract house identification string cleanly from application payload
-    const selectedHouseId = application.houseId || application.house || memberData.houseId || memberData.house || null;
+    // FIXED CASTING OPERATION LAYER: Explicitly captures house parameters and converts them into pure MongoDB ObjectIds
+    let validatedHouseObjectId = null;
+    const rawHouseId = application.houseId || application.house || memberData.houseId || memberData.house;
+    
+    if (rawHouseId && mongoose.Types.ObjectId.isValid(rawHouseId.toString())) {
+      validatedHouseObjectId = new mongoose.Types.ObjectId(rawHouseId.toString());
+    }
 
-    // 1. STEP ONE: Initialize login profile gateway credentials first to retrieve explicit _id reference
     const newUserLoginAccount = await User.create({
       username: assignedUsername,
       email: targetEmail,
@@ -429,17 +437,16 @@ const approveApplication = async (req, res) => {
       roleId: memberRoleDoc._id
     });
 
-    // 2. STEP TWO: Injects demographic profile document record mapping parameters securely
     const member = await Member.create({
       ...memberData,
       username: assignedUsername,
       passwordHash: defaultPasswordHash, 
       role: "Member",
-      
-      // FIXED RELATIONSHIP MATRIX: Saves identity references to satisfy deep lookup model variations
       userId: newUserLoginAccount._id,
-      house: selectedHouseId,
-      houseId: selectedHouseId,
+      
+      // FIXED AUTOMATED SCHEMATIC ASSIGNMENT: Force links casted houses to both target validation properties
+      house: validatedHouseObjectId,
+      houseId: validatedHouseObjectId,
       
       membershipNumber: generateMembershipNumber(),
       approvedAt: new Date()
@@ -447,7 +454,7 @@ const approveApplication = async (req, res) => {
 
     try {
       const transporter = nodemailer.createTransport({
-        host: process.env.EMAIL_HOST || "smtp.gmail.com",
+        host: process.env.EMAIL_HOST || "://gmail.com",
         port: Number(process.env.EMAIL_PORT) || 587,
         secure: process.env.EMAIL_SECURE === "true",
         auth: {
@@ -469,7 +476,6 @@ const approveApplication = async (req, res) => {
               <p style="margin: 6px 0 0 0;"><strong>Login Email Address:</strong> ${targetEmail}</p>
               <p style="margin: 4px 0 0 0;"><strong>Temporary Password String:</strong> ${rawDefaultPassword}</p>
             </div>
-            <p style="font-size: 12px; color: #64748b; margin-bottom: 0;">* Security Notice: Update this temporary password inside your setting panels on your first session login boot loop.</p>
           </div>
         `
       });
@@ -542,7 +548,7 @@ const rejectApplication = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Membership application rejected successfully. Associated registration records have been nullified and wiped clean."
+      message: "Membership application rejected successfully."
     });
   } catch (error) {
     return res.status(500).json({
