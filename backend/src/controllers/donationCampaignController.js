@@ -128,12 +128,19 @@
 //   closeCampaign,
 //   reopenCampaign
 // };
-const DonationCampaign = require("../models/DonationCampaign"); 
+const mongoose = require("mongoose");
 const { createAuditLog } = require("./auditLogController"); 
+
+// Safe model loader guard to prevent OverwriteModelError crashes on Render boot
+let DonationCampaign;
+try {
+  DonationCampaign = mongoose.model("DonationCampaign");
+} catch {
+  DonationCampaign = require("../models/DonationCampaign");
+}
 
 const createCampaign = async (req, res) => { 
   try { 
-    // FIXED LAYER: Safely destructure inputs and provide strict fallback defaults to satisfy schema validation parameters
     const { 
       title, 
       description, 
@@ -148,16 +155,15 @@ const createCampaign = async (req, res) => {
       description: (description || "Public donation campaign portal registry cluster").trim(),
       targetAmount: Number(targetAmount) || 0,
       
-      // FIXED AUTOMATED FALLBACK LAYER: Injects a hardcoded value if the frontend leaves it empty or undefined
-      category: (category && category.trim()) ? category.trim() : "General Welfare",
+      // FIXED ENUM ALIGNMENT: Injects "Welfare Support" which perfectly matches your strict schema list
+      category: (category && category.trim()) ? category.trim() : "Welfare Support",
       
       campaignType: campaignType || "General",
       endDate: endDate || null,
-      status: "OPEN", // Explicitly enforce default active state upon initialization 
-      amountRaised: 0 // Safety: Enforce baseline accumulator to prevent addition calculations from hitting NaN errors 
+      status: "OPEN", 
+      amountRaised: 0 
     }); 
 
-    // Capture the deployment event securely inside the audit ledger 
     await createAuditLog({ 
       userId: req.user?._id || req.body.adminId, 
       module: "Donation Campaign", 
@@ -198,7 +204,6 @@ const closeCampaign = async (req, res) => {
     if (!campaign) { 
       return res.status(404).json({ success: false, message: "Donation campaign profile not found" }); 
     } 
-    // Write close history tracking mapping details 
     await createAuditLog({ 
       userId: req.user?._id, 
       module: "Donation Campaign", 
@@ -224,7 +229,6 @@ const reopenCampaign = async (req, res) => {
     if (!campaign) { 
       return res.status(404).json({ success: false, message: "Donation campaign profile not found" }); 
     } 
-    // Write tracking log 
     await createAuditLog({ 
       userId: req.user?._id, 
       module: "Donation Campaign", 
