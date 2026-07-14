@@ -1,11 +1,11 @@
 // const express = require("express");
-// const mongoose = require("mongoose"); 
+// const mongoose = require("mongoose"); // Safe schema cache query lookups engine
 // const {
 //   getAllMembers,
 //   getMemberById
 // } = require("../controllers/memberController");
-// const { protect } = require("../middlewares/authMiddleware"); 
-// const authorize = require("../middlewares/roleMiddleware"); 
+// const { protect } = require("../middlewares/authMiddleware"); // Token verification guard middleware
+// const authorize = require("../middlewares/roleMiddleware"); // Access constraints controller layer
 
 // const router = express.Router();
 
@@ -13,14 +13,22 @@
 // |--------------------------------------------------------------------------
 // | FIXED LAYER: ACTIVE SUB-ADMINS DIRECTORY ROSTER FEED
 // |--------------------------------------------------------------------------
+// | Resolves the 404 Not Found error by catching the System Control panel's
+// | fetch request. It queries your User collection for all staff roles.
 // */
 // router.get("/admin/list", protect, authorize("SuperAdmin"), async (req, res) => {
 //   try {
 //     const User = mongoose.model("User");
+//     // Pull all users holding administrative system roles, excluding regular Members
 //     const subAdmins = await User.find({
 //       role: { $in: ["MembershipAdmin", "BusinessAdmin", "DonationAdmin", "HouseAdmin", "Admin"] }
 //     }).select("-passwordHash").sort({ createdAt: -1 });
-//     return res.status(200).json({ success: true, count: subAdmins.length, admins: subAdmins });
+
+//     return res.status(200).json({
+//       success: true,
+//       count: subAdmins.length,
+//       admins: subAdmins
+//     });
 //   } catch (error) {
 //     return res.status(500).json({ success: false, message: error.message });
 //   }
@@ -30,6 +38,8 @@
 // |--------------------------------------------------------------------------
 // | PROTECTED MEMBER REGISTRY DIRECTORY (SuperAdmin & MembershipAdmin Only)
 // |--------------------------------------------------------------------------
+// | Safeguards private personal histories, location metrics, and phone
+// | parameters from regular users and external crawlers alike.
 // */
 // router.get("/", protect, authorize("SuperAdmin", "MembershipAdmin"), getAllMembers);
 
@@ -38,6 +48,22 @@
 // | NEW DIRECTORY CONTROLS: ADMINISTRATIVE MEMBER MANIPULATION
 // |--------------------------------------------------------------------------
 // */
+
+// // NEW EXPLICIT ENTRY LOOKUP: Fetches absolute questionnaire datasets for full onboarding form viewer loops
+// router.get("/audit/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req, res) => {
+//   try {
+//     const Member = mongoose.model("Member");
+//     const memberFullFile = await Member.findById(req.params.id).populate("houseId").populate("house");
+    
+//     if (!memberFullFile) {
+//       return res.status(404).json({ success: false, message: "Demographic profile folder not found inside system memory." });
+//     }
+
+//     return res.status(200).json({ success: true, member: memberFullFile });
+//   } catch (error) {
+//     return res.status(500).json({ success: false, message: error.message });
+//   }
+// });
 
 // // UPDATE MEMBER INFO (SuperAdmin & MembershipAdmin)
 // router.put("/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req, res) => {
@@ -164,13 +190,10 @@ const router = express.Router();
 |--------------------------------------------------------------------------
 | FIXED LAYER: ACTIVE SUB-ADMINS DIRECTORY ROSTER FEED
 |--------------------------------------------------------------------------
-| Resolves the 404 Not Found error by catching the System Control panel's
-| fetch request. It queries your User collection for all staff roles.
 */
 router.get("/admin/list", protect, authorize("SuperAdmin"), async (req, res) => {
   try {
     const User = mongoose.model("User");
-    // Pull all users holding administrative system roles, excluding regular Members
     const subAdmins = await User.find({
       role: { $in: ["MembershipAdmin", "BusinessAdmin", "DonationAdmin", "HouseAdmin", "Admin"] }
     }).select("-passwordHash").sort({ createdAt: -1 });
@@ -189,22 +212,23 @@ router.get("/admin/list", protect, authorize("SuperAdmin"), async (req, res) => 
 |--------------------------------------------------------------------------
 | PROTECTED MEMBER REGISTRY DIRECTORY (SuperAdmin & MembershipAdmin Only)
 |--------------------------------------------------------------------------
-| Safeguards private personal histories, location metrics, and phone
-| parameters from regular users and external crawlers alike.
 */
 router.get("/", protect, authorize("SuperAdmin", "MembershipAdmin"), getAllMembers);
 
 /*
 |--------------------------------------------------------------------------
-| NEW DIRECTORY CONTROLS: ADMINISTRATIVE MEMBER MANIPULATION
+| FIXED ADMINISTRATIVE DIRECTORY CONTROLS
 |--------------------------------------------------------------------------
 */
 
-// NEW EXPLICIT ENTRY LOOKUP: Fetches absolute questionnaire datasets for full onboarding form viewer loops
+// FIXED ONBOARDING FORM DETAILS AUDIT LOOKUP ROUTE: Removed invalid paths and bypassed strict populates
 router.get("/audit/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req, res) => {
   try {
     const Member = mongoose.model("Member");
-    const memberFullFile = await Member.findById(req.params.id).populate("houseId").populate("house");
+    
+    // Uses options configuration to prevent Mongoose strict schema compilation drops
+    const memberFullFile = await Member.findById(req.params.id)
+      .populate({ path: "houseId", options: { strictPopulate: false } });
     
     if (!memberFullFile) {
       return res.status(404).json({ success: false, message: "Demographic profile folder not found inside system memory." });
@@ -226,13 +250,12 @@ router.put("/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async (r
       req.params.id,
       { $set: req.body },
       { new: true, runValidators: true }
-    ).populate("houseId").populate("house");
+    ).populate({ path: "houseId", options: { strictPopulate: false } });
 
     if (!updatedMember) {
       return res.status(404).json({ success: false, message: "Member profile not found." });
     }
 
-    // Sync baseline changes over to core User account login table if linked
     if (updatedMember.userId) {
       await User.findByIdAndUpdate(updatedMember.userId, {
         $set: {
@@ -263,7 +286,6 @@ router.delete("/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async
       return res.status(404).json({ success: false, message: "Member account target profile data not found." });
     }
 
-    // Wipe out the demographic database row, the login account document, and matching references
     await Promise.all([
       Member.findByIdAndDelete(req.params.id),
       User.deleteOne({ _id: memberToDelete.userId }),
@@ -309,10 +331,10 @@ router.get("/profile/:id", protect, async (req, res) => {
       }
     }
 
-    let memberProfile = await Member.findById(targetLookupId).populate("houseId");
+    let memberProfile = await Member.findById(targetLookupId).populate({ path: "houseId", options: { strictPopulate: false } });
 
     if (!memberProfile) {
-      memberProfile = await Member.findOne({ $or: [ { userId: targetLookupId }, { email: requestingUser.email.toLowerCase().trim() } ] }).populate("houseId");
+      memberProfile = await Member.findOne({ $or: [ { userId: targetLookupId }, { email: requestingUser.email.toLowerCase().trim() } ] }).populate({ path: "houseId", options: { strictPopulate: false } });
     }
 
     if (!memberProfile) {
