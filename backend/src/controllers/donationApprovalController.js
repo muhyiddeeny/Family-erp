@@ -1,125 +1,185 @@
-const Donation = require("../models/Donation");
-const DonationCampaign = require("../models/DonationCampaign");
-const Notification = require("../models/Notification");
-const { createAuditLog } = require("./auditLogController");
+// const Donation = require("../models/Donation");
+// const DonationCampaign = require("../models/DonationCampaign");
+// const Notification = require("../models/Notification");
+// const { createAuditLog } = require("./auditLogController");
 
-const approveDonation = async (req, res) => {
-  try {
-    const donation = await Donation.findById(req.params.id);
+// const approveDonation = async (req, res) => {
+//   try {
+//     const donation = await Donation.findById(req.params.id);
 
-    if (!donation) {
-      return res.status(404).json({
-        success: false,
-        message: "Donation record not found"
-      });
+//     if (!donation) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Donation record not found"
+//       });
+//     }
+
+//     // 1. DYNAMIC FLAGGING SAFETY CHECK (Fixes campaign balance overwrite loop bug)
+//     if (donation.status === "Approved") {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Action denied: This donation has already been verified and approved"
+//       });
+//     }
+
+//     donation.status = "Approved";
+//     donation.paymentVerified = true;
+//     donation.paymentVerifiedAt = new Date();
+//     await donation.save();
+
+//     // 2. Increment target platform campaign fund accumulator atomically
+//     await DonationCampaign.findByIdAndUpdate(
+//       donation.campaignId,
+//       { $inc: { amountRaised: donation.amount } }
+//     );
+
+//     // 3. Dispatch system notification alert directly to member dashboard feed
+//     await Notification.create({
+//       memberId: donation.memberId,
+//       title: "Donation Deposit Approved",
+//       message: `Your donation contribution has been verified and credited. Thank you for your support!`,
+//       type: "DonationApproval"
+//     });
+
+//     // 4. Log the administrative operation to your secure system audit ledger trail
+//     await createAuditLog({
+//       userId: req.user?._id,
+//       module: "Donation Approval",
+//       action: "Donation Approved",
+//       oldValue: "Pending",
+//       newValue: JSON.stringify({ donationId: donation._id, amount: donation.amount }),
+//       ipAddress: req.ip,
+//       userAgent: req.headers["user-agent"]
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Donation verified successfully and metrics updated",
+//       donation
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message
+//     });
+//   }
+// };
+
+// const rejectDonation = async (req, res) => {
+//   try {
+//     const donation = await Donation.findById(req.params.id);
+
+//     if (!donation) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Donation record not found"
+//       });
+//     }
+
+//     if (donation.status === "Rejected") {
+//       return res.status(400).json({
+//         success: false,
+//         message: "This donation record has already been rejected."
+//       });
+//     }
+
+//     donation.status = "Rejected";
+//     donation.adminRemark = req.body.adminRemark || "Unverified payment transaction proof.";
+//     await donation.save();
+
+//     // Dispatch profile rejection notice feed alert
+//     await Notification.create({
+//       memberId: donation.memberId,
+//       title: "Donation Proof Rejected",
+//       message: `Your donation submission could not be verified. Reason: ${donation.adminRemark}`,
+//       type: "DonationRejection"
+//     });
+
+//     // Write transaction audit trace mapping block
+//     await createAuditLog({
+//       userId: req.user?._id,
+//       module: "Donation Approval",
+//       action: "Donation Rejected",
+//       oldValue: "Pending",
+//       newValue: "Rejected",
+//       ipAddress: req.ip,
+//       userAgent: req.headers["user-agent"]
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Donation request successfully rejected",
+//       donation
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message
+//     });
+//   }
+// };
+
+// module.exports = {
+//   approveDonation,
+//   rejectDonation
+// };
+const express = require("express"); 
+const mongoose = require("mongoose"); // Safe model engine lookup layer
+
+// FIXED LAYER: Load controllers safely after baseline schema modules boot up
+const { 
+  createCampaign, 
+  getCampaigns, 
+  closeCampaign, 
+  reopenCampaign 
+} = require("../controllers/donationCampaignController"); 
+const { submitDonation, getDonations } = require("../controllers/donationController"); 
+const { approveDonation, rejectDonation } = require("../controllers/donationApprovalController"); 
+const { protect } = require("../middlewares/authMiddleware"); 
+const authorize = require("../middlewares/roleMiddleware"); 
+
+const router = express.Router(); 
+
+/* 
+|-------------------------------------------------------------------------- 
+| OPEN CAMPAIGN EXPLORATION (All Authenticated Members) 
+|-------------------------------------------------------------------------- 
+*/ 
+router.get("/campaigns", protect, getCampaigns); 
+router.post("/", protect, submitDonation); 
+
+/* 
+|-------------------------------------------------------------------------- 
+| ADMINISTRATIVE CAMPAIGN MANAGEMENT (SuperAdmin & DonationAdmin Only) 
+|-------------------------------------------------------------------------- 
+*/ 
+router.post(
+  "/campaigns", 
+  protect, 
+  authorize("SuperAdmin", "DonationAdmin"), 
+  (req, res, next) => {
+    // FORCE SCHEMA CONSTRAINTS: Pre-maps required fields safely before database compilation triggers
+    if (!req.body.category || !req.body.category.trim()) {
+      req.body.category = "General Welfare"; 
     }
-
-    // 1. DYNAMIC FLAGGING SAFETY CHECK (Fixes campaign balance overwrite loop bug)
-    if (donation.status === "Approved") {
-      return res.status(400).json({
-        success: false,
-        message: "Action denied: This donation has already been verified and approved"
-      });
+    if (!req.body.campaignType) {
+      req.body.campaignType = "General";
     }
+    next();
+  },
+  createCampaign
+); 
 
-    donation.status = "Approved";
-    donation.paymentVerified = true;
-    donation.paymentVerifiedAt = new Date();
-    await donation.save();
+router.patch("/campaigns/:id/close", protect, authorize("SuperAdmin", "DonationAdmin"), closeCampaign); 
+router.patch("/campaigns/:id/reopen", protect, authorize("SuperAdmin", "DonationAdmin"), reopenCampaign); 
 
-    // 2. Increment target platform campaign fund accumulator atomically
-    await DonationCampaign.findByIdAndUpdate(
-      donation.campaignId,
-      { $inc: { amountRaised: donation.amount } }
-    );
+/* 
+|-------------------------------------------------------------------------- 
+| TRANSACTION LEDGER REVIEW (SuperAdmin & DonationAdmin Only) 
+|-------------------------------------------------------------------------- 
+*/ 
+router.get("/", protect, authorize("SuperAdmin", "DonationAdmin"), getDonations); 
+router.patch("/:id/approve", protect, authorize("SuperAdmin", "DonationAdmin"), approveDonation); 
+router.patch("/:id/reject", protect, authorize("SuperAdmin", "DonationAdmin"), rejectDonation); 
 
-    // 3. Dispatch system notification alert directly to member dashboard feed
-    await Notification.create({
-      memberId: donation.memberId,
-      title: "Donation Deposit Approved",
-      message: `Your donation contribution has been verified and credited. Thank you for your support!`,
-      type: "DonationApproval"
-    });
-
-    // 4. Log the administrative operation to your secure system audit ledger trail
-    await createAuditLog({
-      userId: req.user?._id,
-      module: "Donation Approval",
-      action: "Donation Approved",
-      oldValue: "Pending",
-      newValue: JSON.stringify({ donationId: donation._id, amount: donation.amount }),
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"]
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Donation verified successfully and metrics updated",
-      donation
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-const rejectDonation = async (req, res) => {
-  try {
-    const donation = await Donation.findById(req.params.id);
-
-    if (!donation) {
-      return res.status(404).json({
-        success: false,
-        message: "Donation record not found"
-      });
-    }
-
-    if (donation.status === "Rejected") {
-      return res.status(400).json({
-        success: false,
-        message: "This donation record has already been rejected."
-      });
-    }
-
-    donation.status = "Rejected";
-    donation.adminRemark = req.body.adminRemark || "Unverified payment transaction proof.";
-    await donation.save();
-
-    // Dispatch profile rejection notice feed alert
-    await Notification.create({
-      memberId: donation.memberId,
-      title: "Donation Proof Rejected",
-      message: `Your donation submission could not be verified. Reason: ${donation.adminRemark}`,
-      type: "DonationRejection"
-    });
-
-    // Write transaction audit trace mapping block
-    await createAuditLog({
-      userId: req.user?._id,
-      module: "Donation Approval",
-      action: "Donation Rejected",
-      oldValue: "Pending",
-      newValue: "Rejected",
-      ipAddress: req.ip,
-      userAgent: req.headers["user-agent"]
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Donation request successfully rejected",
-      donation
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
-
-module.exports = {
-  approveDonation,
-  rejectDonation
-};
+module.exports = router;
