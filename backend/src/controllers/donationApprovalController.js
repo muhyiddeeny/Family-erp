@@ -123,63 +123,121 @@
 //   approveDonation,
 //   rejectDonation
 // };
-const express = require("express"); 
-const mongoose = require("mongoose"); // Safe model engine lookup layer
+const mongoose = require("mongoose"); // FIXED LAYER: Direct mongoose core link to avoid model collision loops
+const { createAuditLog } = require("./auditLogController"); 
 
-// FIXED LAYER: Load controllers safely after baseline schema modules boot up
-const { 
-  createCampaign, 
-  getCampaigns, 
-  closeCampaign, 
-  reopenCampaign 
-} = require("../controllers/donationCampaignController"); 
-const { submitDonation, getDonations } = require("../controllers/donationController"); 
-const { approveDonation, rejectDonation } = require("../controllers/donationApprovalController"); 
-const { protect } = require("../middlewares/authMiddleware"); 
-const authorize = require("../middlewares/roleMiddleware"); 
+const createCampaign = async (req, res) => { 
+  try { 
+    // Safely retrieve the already registered model out of active cache cache memory
+    const DonationCampaign = mongoose.model("DonationCampaign");
 
-const router = express.Router(); 
+    const { 
+      title, 
+      description, 
+      targetAmount, 
+      category, 
+      campaignType, 
+      endDate 
+    } = req.body;
 
-/* 
-|-------------------------------------------------------------------------- 
-| OPEN CAMPAIGN EXPLORATION (All Authenticated Members) 
-|-------------------------------------------------------------------------- 
-*/ 
-router.get("/campaigns", protect, getCampaigns); 
-router.post("/", protect, submitDonation); 
+    const campaign = await DonationCampaign.create({ 
+      title: (title || "Community Welfare Fund").trim(),
+      description: (description || "Public donation campaign portal registry cluster").trim(),
+      targetAmount: Number(targetAmount) || 0,
+      
+      // FIXED AUTOMATED FALLBACK LAYER: Injects a hardcoded value if the frontend leaves it empty or undefined
+      category: (category && category.trim()) ? category.trim() : "General Welfare",
+      
+      campaignType: campaignType || "General",
+      endDate: endDate || null,
+      status: "OPEN", // Explicitly enforce default active state upon initialization 
+      amountRaised: 0 // Safety: Enforce baseline accumulator to prevent addition calculations from hitting NaN errors 
+    }); 
 
-/* 
-|-------------------------------------------------------------------------- 
-| ADMINISTRATIVE CAMPAIGN MANAGEMENT (SuperAdmin & DonationAdmin Only) 
-|-------------------------------------------------------------------------- 
-*/ 
-router.post(
-  "/campaigns", 
-  protect, 
-  authorize("SuperAdmin", "DonationAdmin"), 
-  (req, res, next) => {
-    // FORCE SCHEMA CONSTRAINTS: Pre-maps required fields safely before database compilation triggers
-    if (!req.body.category || !req.body.category.trim()) {
-      req.body.category = "General Welfare"; 
-    }
-    if (!req.body.campaignType) {
-      req.body.campaignType = "General";
-    }
-    next();
-  },
-  createCampaign
-); 
+    // Capture the deployment event securely inside the audit ledger 
+    await createAuditLog({ 
+      userId: req.user?._id || req.body.adminId, 
+      module: "Donation Campaign", 
+      action: "Campaign Created", 
+      oldValue: "None", 
+      newValue: JSON.stringify({ id: campaign._id, title: campaign.title, type: campaign.campaignType }), 
+      ipAddress: req.ip, 
+      userAgent: req.headers["user-agent"] 
+    }); 
 
-router.patch("/campaigns/:id/close", protect, authorize("SuperAdmin", "DonationAdmin"), closeCampaign); 
-router.patch("/campaigns/:id/reopen", protect, authorize("SuperAdmin", "DonationAdmin"), reopenCampaign); 
+    return res.status(201).json({ 
+      success: true, 
+      message: "Public donation campaign initialized and open for contributions", 
+      campaign 
+    }); 
 
-/* 
-|-------------------------------------------------------------------------- 
-| TRANSACTION LEDGER REVIEW (SuperAdmin & DonationAdmin Only) 
-|-------------------------------------------------------------------------- 
-*/ 
-router.get("/", protect, authorize("SuperAdmin", "DonationAdmin"), getDonations); 
-router.patch("/:id/approve", protect, authorize("SuperAdmin", "DonationAdmin"), approveDonation); 
-router.patch("/:id/reject", protect, authorize("SuperAdmin", "DonationAdmin"), rejectDonation); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
 
-module.exports = router;
+const getCampaigns = async (req, res) => { 
+  try { 
+    const DonationCampaign = mongoose.model("DonationCampaign");
+    const campaigns = await DonationCampaign.find().sort({ createdAt: -1 }); 
+    return res.status(200).json({ success: true, count: campaigns.length, campaigns }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+const closeCampaign = async (req, res) => { 
+  try { 
+    const DonationCampaign = mongoose.model("DonationCampaign");
+    const campaign = await DonationCampaign.findByIdAndUpdate( 
+      req.params.id, 
+      { status: "CLOSED" }, 
+      { new: true } 
+    ); 
+    if (!campaign) { 
+      return res.status(404).json({ success: false, message: "Donation campaign profile not found" }); 
+    } 
+    // Write close history tracking mapping details 
+    await createAuditLog({ 
+      userId: req.user?._id, 
+      module: "Donation Campaign", 
+      action: "Campaign Closed", 
+      oldValue: "OPEN", 
+      newValue: "CLOSED", 
+      ipAddress: req.ip, 
+      userAgent: req.headers["user-agent"] 
+    }); 
+    return res.status(200).json({ success: true, message: "Donation campaign successfully closed. Submissions are now locked.", campaign }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+const reopenCampaign = async (req, res) => { 
+  try { 
+    const DonationCampaign = mongoose.model("DonationCampaign");
+    const campaign = await DonationCampaign.findByIdAndUpdate( 
+      req.params.id, 
+      { status: "OPEN" }, 
+      { new: true } 
+    ); 
+    if (!campaign) { 
+      return res.status(404).json({ success: false, message: "Donation campaign profile not found" }); 
+    } 
+    // Write tracking log 
+    await createAuditLog({ 
+      userId: req.user?._id, 
+      module: "Donation Campaign", 
+      action: "Campaign Reopened", 
+      oldValue: "CLOSED", 
+      newValue: "OPEN", 
+      ipAddress: req.ip, 
+      userAgent: req.headers["user-agent"] 
+    }); 
+    return res.status(200).json({ success: true, message: "Donation campaign successfully reopened for public member deposits.", campaign }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+module.exports = { createCampaign, getCampaigns, closeCampaign, reopenCampaign };
