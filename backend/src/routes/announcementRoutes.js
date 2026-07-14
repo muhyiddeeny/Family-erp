@@ -39,7 +39,7 @@
 
 // module.exports = router;
 const express = require("express");
-const mongoose = require("mongoose"); // Safe database model lookup engine
+const Announcement = require("../models/Announcement"); // FIXED LAYER: Direct explicit schema import to bypass MissingSchemaError loops
 const { protect } = require("../middlewares/authMiddleware"); // Token validation guard
 const authorize = require("../middlewares/roleMiddleware"); // Clearance level guard
 
@@ -49,13 +49,12 @@ const router = express.Router();
 |--------------------------------------------------------------------------
 | FIXED LAYER: BROADCAST SYSTEM NOTIFICATION CREATION VECTOR
 |--------------------------------------------------------------------------
-| Resolves the 500 error and the missing 'message' path validation crash.
+| Resolves the 500 error by utilizing direct model schema references.
 | It intercepts the frontend's payload and maps 'content' over to 'message'
 | safely right before writing to MongoDB.
 */
 router.post("/", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req, res) => {
   try {
-    const Announcement = mongoose.model("Announcement");
     const { title, content, message } = req.body;
 
     if (!title || (!content && !message)) {
@@ -92,9 +91,7 @@ router.post("/", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req
 // GET ALL: Fetches live notices for the announcement stream feed boards
 router.get("/", protect, async (req, res) => {
   try {
-    const Announcement = mongoose.model("Announcement");
     const notices = await Announcement.find().sort({ createdAt: -1 });
-
     return res.status(200).json({
       success: true,
       count: notices.length,
@@ -109,13 +106,10 @@ router.get("/", protect, async (req, res) => {
 // DELETE NOTICE: Purges broadcast records completely from database context maps
 router.delete("/:id", protect, authorize("SuperAdmin", "MembershipAdmin"), async (req, res) => {
   try {
-    const Announcement = mongoose.model("Announcement");
     const deletedNotice = await Announcement.findByIdAndDelete(req.params.id);
-
     if (!deletedNotice) {
       return res.status(404).json({ success: false, message: "Target announcement post thread not found." });
     }
-
     return res.status(200).json({
       success: true,
       message: "Announcement dropped and removed from live system feeds successfully."
