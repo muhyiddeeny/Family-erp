@@ -94,47 +94,32 @@ const submitApplication = async (req, res) => {
   try { 
     const { memberId, totalInvestmentAmount, participationType, allocations } = req.body; 
 
-    let rawAllocationsArray = allocations || [];
-    const rawInvestmentValue = Number(totalInvestmentAmount) || 0;
+    // FAIL-SAFE ARRAY CHECK: Safely converts allocations to a clean array list layout 
+    // to prevent any fatal '.reduce' type errors if the frontend sends null or single objects
+    let safeAllocationsArray = Array.isArray(allocations) ? allocations : [];
 
-    // OPTIONAL PROJECT AUTO-ADAPTER LAYER
-    if (rawAllocationsArray.length === 0) {
-      rawAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
-    } else if (rawAllocationsArray.length === 1) {
-      // THE FIX: Explicitly target the first element object index [0] to avoid type crashes
-      if (rawAllocationsArray[0]) {
-        rawAllocationsArray[0].percentage = 100;
-      }
-    } else {
-      // If multi-project splits are selected, sum and validate their total weights safely
-      const currentSum = rawAllocationsArray.reduce( 
-        (total, item) => total + (Number(item?.percentage) || 0), 0 
-      ); 
-
-      if (currentSum !== 100 && currentSum > 0) {
-        rawAllocationsArray = rawAllocationsArray.map(item => ({
-          ...item,
-          percentage: Math.round(((Number(item.percentage) || 0) / currentSum) * 100)
-        }));
-        
-        // Fine-tune rounding precision remainders to ensure exact absolute sum of 100
-        const postFixSum = rawAllocationsArray.reduce((t, i) => t + i.percentage, 0);
-        if (postFixSum !== 100 && rawAllocationsArray.length > 0 && rawAllocationsArray[0]) {
-          rawAllocationsArray[0].percentage += (100 - postFixSum);
-        }
-      } else if (currentSum === 0) {
-        // Distribute weights equally across project selections if sent as 0
-        const equalShare = Math.floor(100 / rawAllocationsArray.length);
-        rawAllocationsArray = rawAllocationsArray.map(item => ({ ...item, percentage: equalShare }));
-        if (rawAllocationsArray[0]) {
-          rawAllocationsArray[0].percentage += (100 - (equalShare * rawAllocationsArray.length));
-        }
-      }
+    // If the investor chooses exactly 1 project or leaves allocations empty, auto-force it to 100%
+    if (safeAllocationsArray.length === 0) {
+      safeAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
+    } else if (safeAllocationsArray.length === 1) {
+      safeAllocationsArray[0].percentage = 100;
     }
 
-    // Fetch the active investment rules metadata layer safely
+    // 1. Calculate the percentage weights safely now that the array type is guaranteed
+    const totalPercentage = safeAllocationsArray.reduce( 
+      (total, allocation) => total + (Number(allocation?.percentage) || 0), 0 
+    ); 
+
+    // If multi-project distributions don't add up to 100%, adjust them to pass the check
+    if (totalPercentage !== 100 && safeAllocationsArray.length > 1) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Allocation percentages must equal 100%. Current total is ${totalPercentage}%` 
+      }); 
+    } 
+
+    // 2. Fetch the active investment rules metadata layer safely
     let activeRule = await InvestmentRule.findOne({ isActive: true }).sort({ version: -1 }); 
-    
     if (!activeRule) {
       activeRule = await InvestmentRule.findOne().sort({ version: -1 });
       if (!activeRule) {
@@ -147,21 +132,22 @@ const submitApplication = async (req, res) => {
       }
     }
 
-    // Dynamic 10% Forced Share Fund Calculations Math 
+    // 3. Dynamic 10% Forced Share Fund Calculations Math 
+    const rawInvestmentValue = Number(totalInvestmentAmount) || 0;
     const familyShareAmount = rawInvestmentValue * 0.1; 
     const personalInvestmentAmount = rawInvestmentValue - familyShareAmount; 
 
-    // Target active profile metadata hooks
+    // Auto-resolve authenticated user contexts
     const resolvedMemberId = memberId || req.user?._id || req.user?.id || req.body.userId;
 
-    // Commit the Core Master Portfolio Record (Set to default Pending status) 
+    // 4. Commit the Core Master Portfolio Record (Set to default Pending status) 
     const application = await InvestmentApplication.create({ 
       memberId: resolvedMemberId, 
       totalInvestmentAmount: rawInvestmentValue, 
       familyShareAmount, 
       personalInvestmentAmount, 
       participationType: participationType || "Standard Split", 
-      allocations: rawAllocationsArray, 
+      allocations: safeAllocationsArray, 
       status: "Pending", 
       
       acceptedRuleId: activeRule._id, 
