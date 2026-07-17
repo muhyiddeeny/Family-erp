@@ -126,7 +126,9 @@ const submitApplication = async (req, res) => {
 
     // Check optional choices layout. If exactly 1 project is targeted, force allocation weight to 100%
     if (safeAllocationsArray.length === 1) {
-      safeAllocationsArray[0].percentage = 100;
+      if (safeAllocationsArray[0]) {
+        safeAllocationsArray[0].percentage = 100;
+      }
     } else if (safeAllocationsArray.length === 0) {
       // Prevent structural omission errors by defaulting to a fallback hash id matching your schema rule limits
       safeAllocationsArray = [{ projectId: new mongoose.Types.ObjectId(), percentage: 100 }];
