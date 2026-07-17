@@ -97,11 +97,11 @@ const submitApplication = async (req, res) => {
     let rawAllocationsArray = allocations || [];
     const rawInvestmentValue = Number(totalInvestmentAmount) || 0;
 
-    // PROJECT AUTO-ADAPTER LAYER
+    // OPTIONAL PROJECT AUTO-ADAPTER LAYER
     if (rawAllocationsArray.length === 0) {
       rawAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
     } else if (rawAllocationsArray.length === 1) {
-      // THE FIX: Explicitly target the first element object index [0] to avoid object type runtime errors
+      // THE FIX: Explicitly target the first element object index [0] to avoid type crashes
       if (rawAllocationsArray[0]) {
         rawAllocationsArray[0].percentage = 100;
       }
