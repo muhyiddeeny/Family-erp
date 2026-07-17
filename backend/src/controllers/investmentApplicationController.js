@@ -86,8 +86,7 @@
 //   } 
 // }; 
 
-// module.exports = { submitApplication, getApplications };
-const InvestmentApplication = require("../models/InvestmentApplication"); 
+// module.exports = { submitApplication, getApplications };const InvestmentApplication = require("../models/InvestmentApplication"); 
 const InvestmentRule = require("../models/InvestmentRule"); 
 
 const submitApplication = async (req, res) => { 
@@ -101,8 +100,10 @@ const submitApplication = async (req, res) => {
     if (rawAllocationsArray.length === 0) {
       rawAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
     } else if (rawAllocationsArray.length === 1) {
-      // THE FIX: If the investor picks exactly 1 project, force that single entry to take up 100% of the weight
-      rawAllocationsArray[0].percentage = 100;
+      // FIXED ASSIGNMENT: Mutate the first index object item inside the array correctly
+      if (rawAllocationsArray[0]) {
+        rawAllocationsArray[0].percentage = 100;
+      }
     } else {
       // If they choose multi-project distributions, safely balance out their total weight splits
       const currentSum = rawAllocationsArray.reduce( 
@@ -117,14 +118,16 @@ const submitApplication = async (req, res) => {
         
         // Fine-tune rounding precision remainders to ensure exact absolute sum of 100
         const postFixSum = rawAllocationsArray.reduce((t, i) => t + i.percentage, 0);
-        if (postFixSum !== 100 && rawAllocationsArray.length > 0) {
+        if (postFixSum !== 100 && rawAllocationsArray.length > 0 && rawAllocationsArray[0]) {
           rawAllocationsArray[0].percentage += (100 - postFixSum);
         }
       } else if (currentSum === 0) {
         // If all inputs were sent as 0, distribute equally
         const equalShare = Math.floor(100 / rawAllocationsArray.length);
         rawAllocationsArray = rawAllocationsArray.map(item => ({ ...item, percentage: equalShare }));
-        rawAllocationsArray[0].percentage += (100 - (equalShare * rawAllocationsArray.length));
+        if (rawAllocationsArray[0]) {
+          rawAllocationsArray[0].percentage += (100 - (equalShare * rawAllocationsArray.length));
+        }
       }
     }
 
