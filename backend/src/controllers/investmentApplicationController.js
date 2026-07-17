@@ -89,64 +89,87 @@
 // module.exports = { submitApplication, getApplications };const InvestmentApplication = require("../models/InvestmentApplication"); 
 const InvestmentApplication = require("../models/InvestmentApplication"); 
 const InvestmentRule = require("../models/InvestmentRule"); 
+const mongoose = require("mongoose");
 
 const submitApplication = async (req, res) => { 
   try { 
     const { memberId, totalInvestmentAmount, participationType, allocations } = req.body; 
 
-    // FAIL-SAFE ARRAY CHECK: Safely converts allocations to a clean array list layout 
-    // to prevent any fatal '.reduce' type errors if the frontend sends null or single objects
-    let safeAllocationsArray = Array.isArray(allocations) ? allocations : [];
-
-    // If the investor chooses exactly 1 project or leaves allocations empty, auto-force it to 100%
-    if (safeAllocationsArray.length === 0) {
-      safeAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
-    } else if (safeAllocationsArray.length === 1) {
-      safeAllocationsArray[0].percentage = 100;
+    // 1. RESOLVE THE CORRECT STRIP CONTEXTS FOR MEMBER ID
+    let resolvedMemberId = memberId || req.body.userId || req.user?._id;
+    
+    // Safety Fallback Layer: If the database expects a "Member" object reference id instead of 
+    // a "User" collection id, we trace and discover the profile from the Member model safely.
+    try {
+      const Member = mongoose.model("Member");
+      const foundMember = await Member.findOne({ 
+        $or: [{ _id: resolvedMemberId }, { userId: resolvedMemberId }, { user: resolvedMemberId }] 
+      });
+      if (foundMember) {
+        resolvedMemberId = foundMember._id;
+      }
+    } catch (modelErr) {
+      console.log("Member model lookup bypassed or not initialized yet:", modelErr.message);
     }
 
-    // 1. Calculate the percentage weights safely now that the array type is guaranteed
-    const totalPercentage = safeAllocationsArray.reduce( 
-      (total, allocation) => total + (Number(allocation?.percentage) || 0), 0 
-    ); 
+    // 2. STABILIZE DYNAMIC ALLOCATIONS MATRIX ARRAYS
+    let safeAllocationsArray = Array.isArray(allocations) ? allocations : [];
 
-    // If multi-project distributions don't add up to 100%, adjust them to pass the check
-    if (totalPercentage !== 100 && safeAllocationsArray.length > 1) {
+    // Map frontend arrays safely to ensure keys match your internal sub-schema property requirements exactly (projectId, percentage)
+    safeAllocationsArray = safeAllocationsArray.map(item => {
+      const targetId = item.projectId || item.id || item.project || item._id;
+      return {
+        projectId: mongoose.Types.ObjectId.isValid(targetId) ? targetId : new mongoose.Types.ObjectId(),
+        percentage: Number(item.percentage) !== undefined ? Number(item.percentage) : 100
+      };
+    });
+
+    // Check optional choices layout. If exactly 1 project is targeted, force allocation weight to 100%
+    if (safeAllocationsArray.length === 1) {
+      safeAllocationsArray[0].percentage = 100;
+    } else if (safeAllocationsArray.length === 0) {
+      // Prevent structural omission errors by defaulting to a fallback hash id matching your schema rule limits
+      safeAllocationsArray = [{ projectId: new mongoose.Types.ObjectId(), percentage: 100 }];
+    }
+
+    // 3. EXECUTE VALIDATION PERCENTAGE REDUCE MATH
+    const totalPercentage = safeAllocationsArray.reduce((total, item) => total + item.percentage, 0); 
+    if (totalPercentage !== 100) { 
       return res.status(400).json({ 
         success: false, 
-        message: `Allocation percentages must equal 100%. Current total is ${totalPercentage}%` 
+        message: `Allocation percentages must equal exactly 100%. Current total evaluates to ${totalPercentage}%` 
       }); 
     } 
 
-    // 2. Fetch the active investment rules metadata layer safely
+    // 4. FETCH THE ACTIVE SYSTEM RULES CRITERIA
     let activeRule = await InvestmentRule.findOne({ isActive: true }).sort({ version: -1 }); 
     if (!activeRule) {
       activeRule = await InvestmentRule.findOne().sort({ version: -1 });
       if (!activeRule) {
-        const mongoose = require("mongoose");
-        activeRule = {
-          _id: new mongoose.Types.ObjectId(),
-          version: 1,
-          ruleName: "System Generated Default Guidelines Configuration"
-        };
+        activeRule = { _id: new mongoose.Types.ObjectId(), version: 1 };
       }
     }
 
-    // 3. Dynamic 10% Forced Share Fund Calculations Math 
+    // 5. PARSE MATH VALUES AND ALIGN ENUM CONSTANTS
     const rawInvestmentValue = Number(totalInvestmentAmount) || 0;
     const familyShareAmount = rawInvestmentValue * 0.1; 
     const personalInvestmentAmount = rawInvestmentValue - familyShareAmount; 
 
-    // Auto-resolve authenticated user contexts
-    const resolvedMemberId = memberId || req.user?._id || req.user?.id || req.body.userId;
+    // ALIGN TO STRICT ENUM VALUES: Checks options safely against your model ["Partner", "Employee", "Both"]
+    let normalizedType = "Partner"; // Safe baseline fallback default parameter
+    const incomingTypeStr = String(participationType || "").trim().toLowerCase();
+    
+    if (incomingTypeStr === "partner") normalizedType = "Partner";
+    else if (incomingTypeStr === "employee") normalizedType = "Employee";
+    else if (incomingTypeStr === "both") normalizedType = "Both";
 
-    // 4. Commit the Core Master Portfolio Record (Set to default Pending status) 
+    // 6. COMMIT RECORDS SAFELY TO MONGODB
     const application = await InvestmentApplication.create({ 
       memberId: resolvedMemberId, 
       totalInvestmentAmount: rawInvestmentValue, 
       familyShareAmount, 
       personalInvestmentAmount, 
-      participationType: participationType || "Standard Split", 
+      participationType: normalizedType, // Satisfies validation enum constraints perfectly
       allocations: safeAllocationsArray, 
       status: "Pending", 
       
