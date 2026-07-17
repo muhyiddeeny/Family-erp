@@ -101,7 +101,7 @@ const submitApplication = async (req, res) => {
     if (rawAllocationsArray.length === 0) {
       rawAllocationsArray = [{ project: "General Allocation", percentage: 100 }];
     } else if (rawAllocationsArray.length === 1) {
-      // THE FIX: Mutate the first array element index using [0] to avoid object type runtime errors
+      // THE FIX: Explicitly target the first element object index [0] to avoid object type runtime errors
       if (rawAllocationsArray[0]) {
         rawAllocationsArray[0].percentage = 100;
       }
