@@ -95,11 +95,9 @@ const submitApplication = async (req, res) => {
   try { 
     const { memberId, totalInvestmentAmount, participationType, allocations } = req.body; 
 
-    // 1. RESOLVE THE CORRECT STRIP CONTEXTS FOR MEMBER ID
+    // 1. RESOLVE THE CORRECT MEMBER ID REFERENCE CONTEXT
     let resolvedMemberId = memberId || req.body.userId || req.user?._id;
     
-    // Safety Fallback Layer: If the database expects a "Member" object reference id instead of 
-    // a "User" collection id, we trace and discover the profile from the Member model safely.
     try {
       const Member = mongoose.model("Member");
       const foundMember = await Member.findOne({ 
@@ -109,41 +107,45 @@ const submitApplication = async (req, res) => {
         resolvedMemberId = foundMember._id;
       }
     } catch (modelErr) {
-      console.log("Member model lookup bypassed or not initialized yet:", modelErr.message);
+      console.log("Member model lookup bypassed:", modelErr.message);
     }
 
-    // 2. STABILIZE DYNAMIC ALLOCATIONS MATRIX ARRAYS
-    let safeAllocationsArray = Array.isArray(allocations) ? allocations : [];
+    // 2. STABILIZE DYNAMIC ALLOCATIONS ARRAY WITH ZERO GUESSWORK
+    let finalAllocations = [];
+    const rawAllocations = Array.isArray(allocations) ? allocations : [];
 
-    // Map frontend arrays safely to ensure keys match your internal sub-schema property requirements exactly (projectId, percentage)
-    safeAllocationsArray = safeAllocationsArray.map(item => {
-      const targetId = item.projectId || item.id || item.project || item._id;
-      return {
+    if (rawAllocations.length === 1) {
+      // IF THE USER CHOSE 1 PROJECT: Explicitly format it to take 100% without running any array mutations
+      const singleItem = rawAllocations[0];
+      const targetId = singleItem?.projectId || singleItem?.id || singleItem?.project || singleItem?._id;
+      
+      finalAllocations = [{
         projectId: mongoose.Types.ObjectId.isValid(targetId) ? targetId : new mongoose.Types.ObjectId(),
-        percentage: Number(item.percentage) !== undefined ? Number(item.percentage) : 100
-      };
-    });
+        percentage: 100
+      }];
+    } else if (rawAllocations.length > 1) {
+      // IF THE USER CHOSE 2 PROJECTS: Map the keys and validate that they sum to exactly 100%
+      finalAllocations = rawAllocations.map(item => {
+        const targetId = item.projectId || item.id || item.project || item._id;
+        return {
+          projectId: mongoose.Types.ObjectId.isValid(targetId) ? targetId : new mongoose.Types.ObjectId(),
+          percentage: Number(item.percentage) || 0
+        };
+      });
 
-    // Check optional choices layout. If exactly 1 project is targeted, force allocation weight to 100%
-    if (safeAllocationsArray.length === 1) {
-      if (safeAllocationsArray[0]) {
-        safeAllocationsArray[0].percentage = 100;
-      }
-    } else if (safeAllocationsArray.length === 0) {
-      // Prevent structural omission errors by defaulting to a fallback hash id matching your schema rule limits
-      safeAllocationsArray = [{ projectId: new mongoose.Types.ObjectId(), percentage: 100 }];
+      const totalPercentage = finalAllocations.reduce((sum, item) => sum + item.percentage, 0); 
+      if (totalPercentage !== 100) { 
+        return res.status(400).json({ 
+          success: false, 
+          message: `Allocation percentages must equal exactly 100%. Current total is ${totalPercentage}%` 
+        }); 
+      } 
+    } else {
+      // IF BLANK: Fallback default selection parameters to protect schemas from missing elements
+      finalAllocations = [{ projectId: new mongoose.Types.ObjectId(), percentage: 100 }];
     }
 
-    // 3. EXECUTE VALIDATION PERCENTAGE REDUCE MATH
-    const totalPercentage = safeAllocationsArray.reduce((total, item) => total + item.percentage, 0); 
-    if (totalPercentage !== 100) { 
-      return res.status(400).json({ 
-        success: false, 
-        message: `Allocation percentages must equal exactly 100%. Current total evaluates to ${totalPercentage}%` 
-      }); 
-    } 
-
-    // 4. FETCH THE ACTIVE SYSTEM RULES CRITERIA
+    // 3. FETCH THE ACTIVE SYSTEM RULES
     let activeRule = await InvestmentRule.findOne({ isActive: true }).sort({ version: -1 }); 
     if (!activeRule) {
       activeRule = await InvestmentRule.findOne().sort({ version: -1 });
@@ -152,27 +154,27 @@ const submitApplication = async (req, res) => {
       }
     }
 
-    // 5. PARSE MATH VALUES AND ALIGN ENUM CONSTANTS
+    // 4. PARSE MATH VALUES AND ALIGN STRICT MODEL ENUMS
     const rawInvestmentValue = Number(totalInvestmentAmount) || 0;
     const familyShareAmount = rawInvestmentValue * 0.1; 
     const personalInvestmentAmount = rawInvestmentValue - familyShareAmount; 
 
-    // ALIGN TO STRICT ENUM VALUES: Checks options safely against your model ["Partner", "Employee", "Both"]
-    let normalizedType = "Partner"; // Safe baseline fallback default parameter
+    // Enforce strict model matching: ["Partner", "Employee", "Both"]
+    let normalizedType = "Partner"; 
     const incomingTypeStr = String(participationType || "").trim().toLowerCase();
     
     if (incomingTypeStr === "partner") normalizedType = "Partner";
     else if (incomingTypeStr === "employee") normalizedType = "Employee";
     else if (incomingTypeStr === "both") normalizedType = "Both";
 
-    // 6. COMMIT RECORDS SAFELY TO MONGODB
+    // 5. COMMIT RECORDS SAFELY TO MONGODB
     const application = await InvestmentApplication.create({ 
       memberId: resolvedMemberId, 
       totalInvestmentAmount: rawInvestmentValue, 
       familyShareAmount, 
       personalInvestmentAmount, 
-      participationType: normalizedType, // Satisfies validation enum constraints perfectly
-      allocations: safeAllocationsArray, 
+      participationType: normalizedType, 
+      allocations: finalAllocations, 
       status: "Pending", 
       
       acceptedRuleId: activeRule._id, 
