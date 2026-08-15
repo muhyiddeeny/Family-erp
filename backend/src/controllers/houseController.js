@@ -169,9 +169,10 @@ const createHouse = async (req, res) => {
     // DATA COUPLING LAYER: Map frontend form variables to expected database schema properties
     const housePayload = {
       name: req.body.name || req.body.title || req.body.houseName,
-      // Handle both variations to ensure frontend submission compatibility
       whatsappLink: req.body.whatsappLink || req.body.whatsAppGroupLink || "",
-      status: req.body.status || "VACANT"
+      status: req.body.status || "VACANT",
+      // CRITICAL CRASH FIX: Force initialize an empty array to prevent schema validation failure
+      members: [] 
     };
 
     // Save to database securely using the cleaned data mapping payload
@@ -280,3 +281,4 @@ const assignMemberToHouse = async (req, res) => {
 }; 
 
 module.exports = { createHouse, getAllHouses, updateHouse, deleteHouse, assignMemberToHouse };
+
