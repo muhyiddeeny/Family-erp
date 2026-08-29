@@ -167,17 +167,18 @@ const Member = require("../models/Member");
 
 const createHouse = async (req, res) => { 
   try { 
-    const name = req.body.name || req.body.title || req.body.houseName;
+    // Fallback extraction to ensure we capture the string no matter what key frontend sends
+    const finalHouseName = req.body.houseName || req.body.name || req.body.title;
 
-    if (!name || name.trim() === "") {
+    if (!finalHouseName || finalHouseName.trim() === "") {
       return res.status(400).json({ 
         success: false, 
-        message: "Validation Error: House name is a required field." 
+        message: "Validation Error: houseName is a required field." 
       });
     }
 
     const housePayload = {
-      name: name.trim(),
+      houseName: finalHouseName.trim(), // Matches your database schema rule perfectly
       whatsappLink: req.body.whatsappLink || req.body.whatsAppGroupLink || "",
       status: req.body.status || "VACANT", 
       members: [] 
@@ -230,6 +231,11 @@ const updateHouse = async (req, res) => {
     } 
 
     const updatePayload = { ...req.body };
+    
+    // Maintain alignment with your schema key if the frontend tries to update the name field
+    if (req.body.name) {
+      updatePayload.houseName = req.body.name;
+    }
     if (req.body.whatsAppGroupLink) {
       updatePayload.whatsappLink = req.body.whatsAppGroupLink;
     }
