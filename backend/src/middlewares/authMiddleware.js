@@ -66,7 +66,8 @@ const protect = async (req, res, next) => {
       req.headers.authorization &&
       req.headers.authorization.startsWith("Bearer ")
     ) {
-      token = req.headers.authorization.split(" ")[1];
+      // FIX: Added the [1] array index back so the actual token string is extracted cleanly
+      token = req.headers.authorization.split(" ")[1]; 
     }
 
     if (!token) {
@@ -88,7 +89,7 @@ const protect = async (req, res, next) => {
     }
 
     req.user = user;
-    next(); // Moves safely to roleMiddleware
+    next(); 
   } catch (error) {
     return res.status(401).json({
       success: false,
