@@ -41,8 +41,10 @@ const {
   deleteHouse,
   assignMemberToHouse
 } = require("../controllers/houseController");
-const { protect } = require("../middlewares/authMiddleware"); // Import your session verification middleware
-const authorize = require("../middlewares/roleMiddleware"); // Import your role checking middleware
+const { protect } = require("../middlewares/authMiddleware"); 
+
+// DIRECT RESTORATION LINK: Pulls the factory role function accurately
+const authorize = require("../middlewares/roleMiddleware"); 
 
 const router = express.Router();
 
@@ -50,9 +52,6 @@ const router = express.Router();
 |--------------------------------------------------------------------------
 | HOUSING READ FEED (PUBLIC INTENSITY GATEWAY CHANNELS)
 |--------------------------------------------------------------------------
-| FIXED LAYER: Removed the 'protect' middleware constraint block from this GET route.
-| This allows public applicants filling out the onboarding intake form to see and select 
-| house names, while the underlying controller safeguards private admin parameters.
 */
 router.get("/", getAllHouses);
 
@@ -60,8 +59,8 @@ router.get("/", getAllHouses);
 |--------------------------------------------------------------------------
 | HOUSING STRUCTURE MANAGEMENT (SuperAdmin & HouseAdmin Only)
 |--------------------------------------------------------------------------
-| Creating residential partitions, shifting members, or modifying links 
-| remains strictly locked down behind token authentication checkpoints.
+| This format passes "SuperAdmin" and "HouseAdmin" into (...roles) safely,
+| returning the standard (req, res, next) runner that Express requires.
 */
 router.post("/", protect, authorize("SuperAdmin", "HouseAdmin"), createHouse);
 router.put("/:id", protect, authorize("SuperAdmin", "HouseAdmin"), updateHouse);
