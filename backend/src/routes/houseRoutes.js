@@ -42,8 +42,6 @@ const {
   assignMemberToHouse
 } = require("../controllers/houseController");
 const { protect } = require("../middlewares/authMiddleware"); 
-
-// DIRECT RESTORATION LINK: Pulls the factory role function accurately
 const authorize = require("../middlewares/roleMiddleware"); 
 
 const router = express.Router();
@@ -59,8 +57,6 @@ router.get("/", getAllHouses);
 |--------------------------------------------------------------------------
 | HOUSING STRUCTURE MANAGEMENT (SuperAdmin & HouseAdmin Only)
 |--------------------------------------------------------------------------
-| This format passes "SuperAdmin" and "HouseAdmin" into (...roles) safely,
-| returning the standard (req, res, next) runner that Express requires.
 */
 router.post("/", protect, authorize("SuperAdmin", "HouseAdmin"), createHouse);
 router.put("/:id", protect, authorize("SuperAdmin", "HouseAdmin"), updateHouse);
