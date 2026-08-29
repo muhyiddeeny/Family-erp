@@ -162,22 +162,23 @@
 //   assignMemberToHouse
 // };
 
+const House = require("../models/House"); 
+const Member = require("../models/Member"); 
+
 const createHouse = async (req, res) => { 
   try { 
     const name = req.body.name || req.body.title || req.body.houseName;
 
-    // Explicit validation check BEFORE reaching Mongoose schema layer
     if (!name || name.trim() === "") {
       return res.status(400).json({ 
         success: false, 
-        message: "Validation Error: House name is a strictly required field." 
+        message: "Validation Error: House name is a required field." 
       });
     }
 
     const housePayload = {
       name: name.trim(),
       whatsappLink: req.body.whatsappLink || req.body.whatsAppGroupLink || "",
-      // Destructure or map additional payload fields safely
       status: req.body.status || "VACANT", 
       members: [] 
     };
@@ -185,7 +186,6 @@ const createHouse = async (req, res) => {
     const house = await House.create(housePayload); 
     return res.status(201).json({ success: true, house }); 
   } catch (error) { 
-    // Return a clearer 400 bad request error status if it's a database schema constraint issue
     const statusCode = error.name === "ValidationError" ? 400 : 500;
     return res.status(statusCode).json({ success: false, message: error.message }); 
   } 
@@ -199,10 +199,9 @@ const getAllHouses = async (req, res) => {
     const isAdmin = userRole === "Admin" || userRole === "SuperAdmin" || userRole === "HouseAdmin"; 
     
     if (!isAdmin) { 
-      // SECURE PUBLIC FALLBACK: Read from query param or fallback gracefully if user doesn't exist yet
       const targetMemberId = req.user?._id || req.query.memberId;
-      
       let assignedHouseId = null;
+      
       if (targetMemberId) {
         const memberProfile = await Member.findById(targetMemberId); 
         assignedHouseId = memberProfile?.houseId?.toString(); 
@@ -210,7 +209,6 @@ const getAllHouses = async (req, res) => {
       
       houses = houses.map(house => { 
         const houseObj = house.toObject(); 
-        // If they are public unauthenticated or it's not their assigned house, hide private links
         if (!assignedHouseId || houseObj._id.toString() !== assignedHouseId) { 
           delete houseObj.whatsappLink; 
           delete houseObj.whatsAppGroupLink; 
@@ -223,3 +221,66 @@ const getAllHouses = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message }); 
   } 
 }; 
+
+const updateHouse = async (req, res) => { 
+  try { 
+    const userRole = req.user?.role; 
+    if (userRole !== "SuperAdmin" && userRole !== "Admin" && userRole !== "HouseAdmin") { 
+      return res.status(403).json({ success: false, message: "Access Denied: You do not have permission to update house properties." }); 
+    } 
+
+    const updatePayload = { ...req.body };
+    if (req.body.whatsAppGroupLink) {
+      updatePayload.whatsappLink = req.body.whatsAppGroupLink;
+    }
+
+    const house = await House.findByIdAndUpdate( 
+      req.params.id, 
+      updatePayload, 
+      { new: true, runValidators: true } 
+    ); 
+    if (!house) { 
+      return res.status(404).json({ success: false, message: "Target house entity record not found." }); 
+    } 
+    return res.status(200).json({ success: true, house }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+const deleteHouse = async (req, res) => { 
+  try { 
+    const houseId = req.params.id; 
+    await Member.updateMany({ houseId }, { $unset: { houseId: "" } }); 
+    await House.findByIdAndDelete(houseId); 
+    return res.status(200).json({ success: true, message: "House deleted successfully and associated member links cleared" }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+const assignMemberToHouse = async (req, res) => { 
+  try { 
+    const { memberId } = req.body; 
+    const targetHouseId = req.params.id; 
+    const house = await House.findById(targetHouseId); 
+    const member = await Member.findById(memberId); 
+    if (!house || !member) { 
+      return res.status(404).json({ success: false, message: "House or Member not found" }); 
+    } 
+    if (member.houseId && member.houseId.toString() !== targetHouseId) { 
+      await House.findByIdAndUpdate(member.houseId, { $pull: { members: member._id } }); 
+    } 
+    member.houseId = house._id; 
+    await member.save(); 
+    if (!house.members.includes(member._id)) { 
+      house.members.push(member._id); 
+      await house.save(); 
+    } 
+    return res.status(200).json({ success: true, message: "Member assigned successfully and old house balances reconciled" }); 
+  } catch (error) { 
+    return res.status(500).json({ success: false, message: error.message }); 
+  } 
+}; 
+
+module.exports = { createHouse, getAllHouses, updateHouse, deleteHouse, assignMemberToHouse };
