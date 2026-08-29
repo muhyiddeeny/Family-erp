@@ -167,7 +167,6 @@ const Member = require("../models/Member");
 
 const createHouse = async (req, res) => { 
   try { 
-    // Fallback extraction to ensure we capture the string no matter what key frontend sends
     const finalHouseName = req.body.houseName || req.body.name || req.body.title;
 
     if (!finalHouseName || finalHouseName.trim() === "") {
@@ -178,7 +177,7 @@ const createHouse = async (req, res) => {
     }
 
     const housePayload = {
-      houseName: finalHouseName.trim(), // Matches your database schema rule perfectly
+      houseName: finalHouseName.trim(), 
       whatsappLink: req.body.whatsappLink || req.body.whatsAppGroupLink || "",
       status: req.body.status || "VACANT", 
       members: [] 
@@ -232,7 +231,6 @@ const updateHouse = async (req, res) => {
 
     const updatePayload = { ...req.body };
     
-    // Maintain alignment with your schema key if the frontend tries to update the name field
     if (req.body.name) {
       updatePayload.houseName = req.body.name;
     }
@@ -289,4 +287,11 @@ const assignMemberToHouse = async (req, res) => {
   } 
 }; 
 
-module.exports = { createHouse, getAllHouses, updateHouse, deleteHouse, assignMemberToHouse };
+// FIX: Exporting the functions so the router can find them instead of throwing undefined
+module.exports = { 
+  createHouse, 
+  getAllHouses, 
+  updateHouse, 
+  deleteHouse, 
+  assignMemberToHouse 
+};
