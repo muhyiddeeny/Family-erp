@@ -77,9 +77,8 @@ const lockError = () => {
   throw new Error("Security violation: Ledger entries are immutable and locked against updates or deletion.");
 };
 
-familyShareFundLedgerSchema.pre("save", function (next) {
+familyShareFundLedgerSchema.pre("save", function () {
   if (!this.isNew) lockError();
-  next();
 });
 familyShareFundLedgerSchema.pre("findOneAndUpdate", lockError);
 familyShareFundLedgerSchema.pre("updateOne", lockError);
