@@ -2,7 +2,6 @@ const mongoose = require("mongoose");
 
 const memberSchema = new mongoose.Schema(
   {
-    // 1. SYSTEM SECURITY & CREDENTIAL ACCESS LAYER (Fixes profile lockout bug)
     username: {
       type: String,
       trim: true
@@ -17,7 +16,6 @@ const memberSchema = new mongoose.Schema(
       default: "Member"
     },
 
-    // 2. PERSONAL INFORMATION
     firstName: {
       type: String,
       required: true,
@@ -50,7 +48,6 @@ const memberSchema = new mongoose.Schema(
     relationToFamily: String,
     passportPhoto: String, // Synchronized with your frontend forms variable name keys
 
-    // 3. CONTACT INFORMATION
     personalPhoneNumber: String,
     officePhoneNumber: String,
     email: {
@@ -61,7 +58,6 @@ const memberSchema = new mongoose.Schema(
       lowercase: true
     },
 
-    // 4. LOCATION INFORMATION
     homeCountry: String,
     residentCountry: String,
     residentialAddress: String,
@@ -70,7 +66,6 @@ const memberSchema = new mongoose.Schema(
     ward: String,
     pollingUnit: String,
 
-    // 5. EDUCATIONAL INFORMATION
     nurserySchool: String,
     primarySchool: String,
     juniorSecondarySchool: String,
@@ -88,7 +83,6 @@ const memberSchema = new mongoose.Schema(
     courseOfStudy: String,
     levelOfStudy: String,
 
-    // 6. ISLAMIC KNOWLEDGE INFORMATION (Enforces booleans matching your analytics controllers)
     kaida: { type: Boolean, default: false },
     alkhdari: { type: Boolean, default: false },
     ishmawi: { type: Boolean, default: false },
@@ -96,37 +90,35 @@ const memberSchema = new mongoose.Schema(
     kurdubi: { type: Boolean, default: false },
     mukhtasar: { type: Boolean, default: false },
 
-    // 7. QURANIC METRICS
     numberOfJuzMemorized: { type: Number, default: 0 },
     numberOfJuzWritten: { type: Number, default: 0 },
 
-    // 8. OCCUPATION & EMPLOYMENT BACKGROUND
     occupationCategory: String,
     occupationDescription: String,
     workExperience: String,
 
-    // 9. GUIDANCE INFORMATION
     favoriteActivity: String,
     presentActivityInformation: String,
 
-    // 10. DISABILITY DATA
     disabilityType: String,
     medicalTreatment: String,
     disabilityDuration: String,
 
-    // 11. MARITAL INFRASTRUCTURE
     maritalStatus: String,
     spouseInformation: String,
+    spouseUsername: {
+      type: String,
+      trim: true,
+      default: ""
+    },
     numberOfChildren: { type: Number, default: 0 },
 
-    // 12. DEMOGRAPHICS & LEGAL WRAPPERS
     religion: String,
     tribe: String,
     nationality: String,
     wasiyyaDetails: String,
     opportunityInterest: String,
 
-    // 13. RELATIONAL ACCESS SYSTEM REFERENCES
     houseId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "House",
