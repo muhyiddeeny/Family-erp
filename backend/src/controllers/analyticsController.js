@@ -4,9 +4,72 @@ const InvestmentApplication = require("../models/InvestmentApplication");
 const EmploymentApplication = require("../models/EmploymentApplication");
 const Donation = require("../models/Donation");
 
+const person = (m) => ({
+  name: `${m.firstName || ""} ${m.surname || ""}`.trim(),
+  username: m.username || "",
+  gender: m.gender || ""
+});
+
+/*
+|--------------------------------------------------------------------------
+| COUPLES WITHIN THE FAMILY
+|--------------------------------------------------------------------------
+| A couple is "confirmed" only when BOTH members have listed each other's
+| username. One-sided links are reported separately as "pending".
+*/
+const buildCoupleAnalytics = async () => {
+  const members = await Member.find().select("firstName surname username gender spouseUsername").lean();
+
+  const byUsername = new Map(
+    members.map((m) => [String(m.username || "").toLowerCase(), m])
+  );
+
+  const seenPairs = new Set();
+  const confirmedCouples = [];
+  const pendingLinks = [];
+
+  for (const m of members) {
+    const claimed = String(m.spouseUsername || "").trim();
+    if (!claimed) continue;
+
+    const partner = byUsername.get(claimed.toLowerCase());
+
+    if (!partner) {
+      pendingLinks.push({
+        member: person(m),
+        claimedPartner: claimed,
+        reason: "No member found with that partner username"
+      });
+      continue;
+    }
+
+    const partnerPointsBack =
+      String(partner.spouseUsername || "").trim().toLowerCase() === String(m.username || "").toLowerCase();
+
+    if (partnerPointsBack) {
+      const pairKey = [String(m._id), String(partner._id)].sort().join("-");
+      if (seenPairs.has(pairKey)) continue;
+      seenPairs.add(pairKey);
+      confirmedCouples.push({ partnerOne: person(m), partnerTwo: person(partner) });
+    } else {
+      pendingLinks.push({
+        member: person(m),
+        claimedPartner: person(partner).name || claimed,
+        reason: "Partner has not listed this member back yet"
+      });
+    }
+  }
+
+  return {
+    totalCouples: confirmedCouples.length,
+    pendingCount: pendingLinks.length,
+    confirmedCouples,
+    pendingLinks
+  };
+};
+
 const getAnalytics = async (req, res) => {
   try {
-    // 1. Run top-level summaries concurrently using parallel promises (saves network wait time)
     const [
       totalMembers,
       maleMembers,
@@ -34,7 +97,6 @@ const getAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          // Education Tallies (Evaluates dynamically if fields exist/are true)
           diploma: { $sum: { $cond: [{ $eq: ["$diploma", "Yes"] }, 1, 0] } },
           nce: { $sum: { $cond: [{ $eq: ["$nce", "Yes"] }, 1, 0] } },
           hnd: { $sum: { $cond: [{ $eq: ["$hnd", "Yes"] }, 1, 0] } },
@@ -42,7 +104,6 @@ const getAnalytics = async (req, res) => {
           masters: { $sum: { $cond: [{ $eq: ["$masters", "Yes"] }, 1, 0] } },
           phd: { $sum: { $cond: [{ $eq: ["$phd", "Yes"] }, 1, 0] } },
 
-          // Islamic Knowledge Level Tallies
           kaida: { $sum: { $cond: [{ $eq: ["$kaida", "Yes"] }, 1, 0] } },
           alkhdari: { $sum: { $cond: [{ $eq: ["$alkhdari", "Yes"] }, 1, 0] } },
           ishmawi: { $sum: { $cond: [{ $eq: ["$ishmawi", "Yes"] }, 1, 0] } },
@@ -50,11 +111,9 @@ const getAnalytics = async (req, res) => {
           kurdubi: { $sum: { $cond: [{ $eq: ["$kurdubi", "Yes"] }, 1, 0] } },
           mukhtasar: { $sum: { $cond: [{ $eq: ["$mukhtasar", "Yes"] }, 1, 0] } },
 
-          // Quranic Juz Metrics Accumulation
           totalJuzMemorized: { $sum: { $ifNull: ["$juzMemorized", 0] } },
           totalJuzWritten: { $sum: { $ifNull: ["$juzWritten", 0] } },
 
-          // Push arrays for dynamic key-value clustering (States, Occupations, etc.)
           states: { $push: { $ifNull: ["$state", "Unknown"] } },
           occupations: { $push: { $ifNull: ["$occupationCategory", "Unknown"] } },
           maritalStatuses: { $push: { $ifNull: ["$maritalStatus", "Unknown"] } },
@@ -63,7 +122,6 @@ const getAnalytics = async (req, res) => {
       }
     ]);
 
-    // FIXED LAYER: Safely assign fallback defaults if array is empty or uninitialized
     const metrics = aggregationResult.length > 0 ? aggregationResult[0] : {
       diploma: 0, nce: 0, hnd: 0, degree: 0, masters: 0, phd: 0,
       kaida: 0, alkhdari: 0, ishmawi: 0, iziyya: 0, kurdubi: 0, mukhtasar: 0,
@@ -71,7 +129,6 @@ const getAnalytics = async (req, res) => {
       states: [], occupations: [], maritalStatuses: [], interests: []
     };
 
-    // Helper function to transform array lists into grouped frequency objects
     const clusterData = (arr = []) => {
       if (!Array.isArray(arr)) return {};
       return arr.reduce((acc, val) => {
@@ -88,15 +145,13 @@ const getAnalytics = async (req, res) => {
     const parseOccupationSectorArrayData = (rawStringArray = []) => {
       const consolidatedTallySummary = {};
       if (!Array.isArray(rawStringArray)) return consolidatedTallySummary;
-      
+
       rawStringArray.forEach(entry => {
-        // FIXED SAFETY LAYER: Instantly intercept and handle empty, null, or undefined data properties safely
         if (!entry || typeof entry !== "string" || entry === "Unknown") {
           consolidatedTallySummary["Unknown"] = (consolidatedTallySummary["Unknown"] || 0) + 1;
           return;
         }
-        
-        // Break compound entries like "Farmer, Artisan" into individual words safely
+
         const splitTokens = entry.split(", ");
         splitTokens.forEach(token => {
           if (token) {
@@ -107,11 +162,17 @@ const getAnalytics = async (req, res) => {
           }
         });
       });
-      
+
       return consolidatedTallySummary;
     };
 
-    // COMPATIBILITY INTERFACE LAYER: Map fields so frontend destructuring keys always match up
+    let coupleAnalytics = { totalCouples: 0, pendingCount: 0, confirmedCouples: [], pendingLinks: [] };
+    try {
+      coupleAnalytics = await buildCoupleAnalytics();
+    } catch (coupleError) {
+      console.error("Couple analytics error:", coupleError);
+    }
+
     return res.status(200).json({
       success: true,
       summaryCards: {
@@ -148,7 +209,8 @@ const getAnalytics = async (req, res) => {
       locationAnalytics: clusterData(metrics.states),
       occupationAnalytics: parseOccupationSectorArrayData(metrics.occupations),
       maritalAnalytics: clusterData(metrics.maritalStatuses),
-      opportunityAnalytics: clusterData(metrics.interests)
+      opportunityAnalytics: clusterData(metrics.interests),
+      coupleAnalytics
     });
 
   } catch (error) {
