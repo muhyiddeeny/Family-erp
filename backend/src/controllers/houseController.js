@@ -1,6 +1,13 @@
 const House = require("../models/House");
 const Member = require("../models/Member");
 
+// Makes sure a saved WhatsApp link always opens correctly (adds https:// when missing)
+const normalizeLink = (link) => {
+  const text = String(link || "").trim();
+  if (!text) return "";
+  return /^https?:\/\//i.test(text) ? text : `https://${text.replace(/^\/+/, "")}`;
+};
+
 const createHouse = async (req, res) => {
   try {
     const finalHouseName = (req.body.houseName || req.body.name || req.body.title || "").trim();
@@ -15,8 +22,9 @@ const createHouse = async (req, res) => {
     const house = await House.create({
       houseName: finalHouseName,
       description: req.body.description || "",
-      whatsappCommunityLink:
-        req.body.whatsappCommunityLink || req.body.whatsAppGroupLink || req.body.whatsappLink || "",
+      whatsappCommunityLink: normalizeLink(
+        req.body.whatsappCommunityLink || req.body.whatsAppGroupLink || req.body.whatsappLink
+      ),
       status: req.body.status || "VACANT",
       members: []
     });
@@ -79,7 +87,7 @@ const updateHouse = async (req, res) => {
     }
     if (req.body.description !== undefined) updatePayload.description = req.body.description;
     const link = req.body.whatsappCommunityLink ?? req.body.whatsAppGroupLink ?? req.body.whatsappLink;
-    if (link !== undefined) updatePayload.whatsappCommunityLink = link;
+    if (link !== undefined) updatePayload.whatsappCommunityLink = normalizeLink(link);
     if (req.body.status) updatePayload.status = req.body.status;
 
     const house = await House.findByIdAndUpdate(req.params.id, updatePayload, {
