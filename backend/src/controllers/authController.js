@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
-const crypto = require("crypto"); 
+const crypto = require("crypto");
+const nodemailer = require("nodemailer"); 
 const User = require("../models/User");
 const Role = require("../models/Role"); 
 const generateToken = require("../utils/generateToken");
@@ -170,72 +171,129 @@ const getMe = async (req, res) => {
 | FORGOT PASSWORD GENERATOR PIPELINE
 |--------------------------------------------------------------------------
 */
+const hashCode = (code) => crypto.createHash("sha256").update(String(code).trim().toLowerCase()).digest("hex");
+
+const buildMailTransporter = () => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) return null;
+  return nodemailer.createTransport({
+    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    port: Number(process.env.EMAIL_PORT) || 587,
+    secure: process.env.EMAIL_SECURE === "true",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD
+    }
+  });
+};
+
+// Test mode only: returns the code in the API response. Never enable this in real use.
+const debugResetEnabled = () => process.env.ALLOW_DEBUG_RESET_TOKEN === "true";
+
 const forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = String(req.body.email || "").trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ success: false, message: "Email parameter is required." });
     }
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) {
-      return res.status(200).json({ success: true, message: "If account exists, token recovery code has been generated." });
+    const transporter = buildMailTransporter();
+    if (!transporter && !debugResetEnabled()) {
+      console.error("Password reset unavailable: EMAIL_USER / EMAIL_PASSWORD are not set.");
+      return res.status(503).json({
+        success: false,
+        message: "The password reset email service is not set up yet. Please contact the administrator."
+      });
     }
 
-    const resetToken = crypto.randomBytes(20).toString("hex");
-    
-    user.resetPasswordToken = crypto.createHash("sha256").update(resetToken).digest("hex");
-    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000; 
+    const genericResponse = {
+      success: true,
+      message: "If an account exists for that email, a reset code has been sent."
+    };
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(200).json(genericResponse);
+    }
+
+    const resetCode = crypto.randomBytes(4).toString("hex"); // 8-character code
+
+    user.resetPasswordToken = hashCode(resetCode);
+    user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
+
+    let emailSent = false;
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: `"Family Platform" <${process.env.EMAIL_USER}>`,
+          to: user.email,
+          subject: "Your password reset code",
+          text:
+            `Hello ${user.username},\n\n` +
+            `Your password reset code is: ${resetCode}\n\n` +
+            `It is valid for 10 minutes. If you did not request this, you can ignore this email.`
+        });
+        emailSent = true;
+      } catch (mailError) {
+        console.error("Password reset email failed:", mailError.message);
+      }
+    }
+
+    if (!emailSent && !debugResetEnabled()) {
+      return res.status(502).json({
+        success: false,
+        message: "We could not send the reset email right now. Please try again later."
+      });
+    }
 
     await createAuditLog({
       userId: user._id,
       module: "Authentication",
-      action: "Password Reset Token Generated",
-      newValue: `Expires in 10 minutes. Plain text debug token: ${resetToken}`
+      action: "Password Reset Code Generated",
+      newValue: "Reset code generated. Expires in 10 minutes."
     });
 
-    console.log("------------------------------------------------------------------");
-    console.log("🔑 PLATFORM PASSWORD RESET WORKSPACE UTILITY CODE GENERATED!");
-    console.log(`Target Email account: ${user.email}`);
-    console.log(`Plain text Token Code (Copy this to screen field): ${resetToken}`);
-    console.log("------------------------------------------------------------------");
+    const response = { ...genericResponse };
+    if (debugResetEnabled()) {
+      response.debugToken = resetCode;
+      console.log(`[DEBUG RESET] ${user.email} -> ${resetCode}`);
+    }
 
-    return res.status(200).json({
-      success: true,
-      message: "Recovery key code generated successfully inside server environment maps. Check logs or mail vectors.",
-      debugToken: resetToken 
-    });
-
+    return res.status(200).json(response);
   } catch (error) {
+    console.error("forgotPassword error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /*
 |--------------------------------------------------------------------------
-| PASSWORD RESET OVERWRITE EXECUTION
+| PASSWORD RESET EXECUTION
 |--------------------------------------------------------------------------
 */
 const resetPassword = async (req, res) => {
   try {
-    const { token, newPassword } = req.body;
-    if (!token || !newPassword) {
-      return res.status(400).json({ success: false, message: "Token key and new passphrase fields are required." });
+    const { email, token, newPassword } = req.body;
+
+    if (!email || !token || !newPassword) {
+      return res.status(400).json({ success: false, message: "Email, reset code and new password are required." });
     }
 
-    const encryptedToken = crypto.createHash("sha256").update(token.trim()).digest("hex");
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ success: false, message: "Your new password must be at least 6 characters long." });
+    }
 
     const user = await User.findOne({
-      resetPasswordToken: encryptedToken,
-      resetPasswordExpires: { $gt: Date.now() } 
+      email: String(email).trim().toLowerCase(),
+      resetPasswordToken: hashCode(token),
+      resetPasswordExpires: { $gt: new Date() }
     });
 
     if (!user) {
-      return res.status(400).json({ success: false, message: "Invalid access token key or recovery timeframe has expired." });
+      return res.status(400).json({ success: false, message: "Invalid reset code, or the code has expired." });
     }
 
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.passwordHash = await bcrypt.hash(String(newPassword), 10);
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
     await user.save();
@@ -244,15 +302,15 @@ const resetPassword = async (req, res) => {
       userId: user._id,
       module: "Authentication",
       action: "Password Reset Execution Successful",
-      newValue: "Credential profile passphrase reset via recovery tokens completed successfully."
+      newValue: "Password was reset using an emailed recovery code."
     });
 
     return res.status(200).json({
       success: true,
-      message: "Your platform passphrase has been updated successfully! Proceed to secure login view screens."
+      message: "Your password has been updated successfully. You can now log in."
     });
-
   } catch (error) {
+    console.error("resetPassword error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
