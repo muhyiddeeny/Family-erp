@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
-const nodemailer = require("nodemailer"); 
 const User = require("../models/User");
+const Member = require("../models/Member");
 const Role = require("../models/Role"); 
 const generateToken = require("../utils/generateToken");
 const { createAuditLog } = require("./auditLogController"); 
@@ -13,7 +13,7 @@ const { createAuditLog } = require("./auditLogController");
 */
 const register = async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
+    const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
       return res.status(400).json({
@@ -36,7 +36,7 @@ const register = async (req, res) => {
       });
     }
 
-    const targetRoleName = role || "Member";
+    const targetRoleName = "Member"; // public sign-up can never create admin accounts
     let roleDocument = await Role.findOne({ name: targetRoleName });
 
     if (!roleDocument) {
@@ -168,149 +168,274 @@ const getMe = async (req, res) => {
 
 /*
 |--------------------------------------------------------------------------
-| FORGOT PASSWORD GENERATOR PIPELINE
+| PASSWORD MANAGEMENT
 |--------------------------------------------------------------------------
 */
-const hashCode = (code) => crypto.createHash("sha256").update(String(code).trim().toLowerCase()).digest("hex");
+const PASSWORD_MIN_LENGTH = 8;
 
-const buildMailTransporter = () => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) return null;
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: Number(process.env.EMAIL_PORT) || 587,
-    secure: process.env.EMAIL_SECURE === "true",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD
-    }
-  });
+// Random 10-character password without look-alike characters (no 0/O, 1/l/I)
+const generateTemporaryPassword = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let password = "";
+  for (let i = 0; i < 10; i++) password += chars[crypto.randomInt(chars.length)];
+  return password;
 };
 
-// Test mode only: returns the code in the API response. Never enable this in real use.
-const debugResetEnabled = () => process.env.ALLOW_DEBUG_RESET_TOKEN === "true";
-
-const forgotPassword = async (req, res) => {
+const safeAudit = async (data) => {
   try {
-    const email = String(req.body.email || "").trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ success: false, message: "Email parameter is required." });
+    await createAuditLog(data);
+  } catch (auditError) {
+    console.error("Audit log error:", auditError.message);
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| ADMIN RESETS A MEMBER'S PASSWORD (SuperAdmin / MembershipAdmin only)
+|--------------------------------------------------------------------------
+*/
+const adminResetMemberPassword = async (req, res) => {
+  try {
+    const { memberId } = req.body;
+
+    if (!memberId) {
+      return res.status(400).json({ success: false, message: "memberId is required." });
     }
 
-    const transporter = buildMailTransporter();
-    if (!transporter && !debugResetEnabled()) {
-      console.error("Password reset unavailable: EMAIL_USER / EMAIL_PASSWORD are not set.");
-      return res.status(503).json({
+    const member = await Member.findById(memberId);
+    if (!member) {
+      return res.status(404).json({ success: false, message: "Member not found." });
+    }
+
+    let user = await User.findOne({ email: String(member.email || "").toLowerCase() });
+    if (!user && member.username) {
+      user = await User.findOne({ username: member.username });
+    }
+    if (!user) {
+      return res.status(404).json({ success: false, message: "No login account was found for this member." });
+    }
+
+    // Only a SuperAdmin can reset the password of an administrator account
+    if (user.role !== "Member" && req.user.role !== "SuperAdmin") {
+      return res.status(403).json({
         success: false,
-        message: "The password reset email service is not set up yet. Please contact the administrator."
+        message: "Only a SuperAdmin can reset an administrator's password."
       });
     }
 
-    const genericResponse = {
-      success: true,
-      message: "If an account exists for that email, a reset code has been sent."
-    };
+    const temporaryPassword = generateTemporaryPassword();
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(200).json(genericResponse);
-    }
-
-    const resetCode = crypto.randomBytes(4).toString("hex"); // 8-character code
-
-    user.resetPasswordToken = hashCode(resetCode);
-    user.resetPasswordExpires = new Date(Date.now() + 10 * 60 * 1000);
+    user.passwordHash = passwordHash;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
     await user.save();
 
-    let emailSent = false;
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: `"Family Platform" <${process.env.EMAIL_USER}>`,
-          to: user.email,
-          subject: "Your password reset code",
-          text:
-            `Hello ${user.username},\n\n` +
-            `Your password reset code is: ${resetCode}\n\n` +
-            `It is valid for 10 minutes. If you did not request this, you can ignore this email.`
-        });
-        emailSent = true;
-      } catch (mailError) {
-        console.error("Password reset email failed:", mailError.message);
-      }
-    }
+    await Member.updateOne({ _id: member._id }, { passwordHash });
 
-    if (!emailSent && !debugResetEnabled()) {
-      return res.status(502).json({
-        success: false,
-        message: "We could not send the reset email right now. Please try again later."
-      });
-    }
-
-    await createAuditLog({
-      userId: user._id,
+    await safeAudit({
+      userId: req.user._id,
       module: "Authentication",
-      action: "Password Reset Code Generated",
-      newValue: "Reset code generated. Expires in 10 minutes."
+      action: "Admin Password Reset",
+      newValue: `Password reset for ${user.email}`,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
     });
 
-    const response = { ...genericResponse };
-    if (debugResetEnabled()) {
-      response.debugToken = resetCode;
-      console.log(`[DEBUG RESET] ${user.email} -> ${resetCode}`);
-    }
-
-    return res.status(200).json(response);
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({
+      success: true,
+      message: "Temporary password generated.",
+      temporaryPassword,
+      member: {
+        name: `${member.firstName || ""} ${member.surname || ""}`.trim(),
+        username: user.username,
+        email: user.email
+      }
+    });
   } catch (error) {
-    console.error("forgotPassword error:", error);
+    console.error("adminResetMemberPassword error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
 /*
 |--------------------------------------------------------------------------
-| PASSWORD RESET EXECUTION
+| LOGGED-IN USER CHANGES THEIR OWN PASSWORD
 |--------------------------------------------------------------------------
 */
-const resetPassword = async (req, res) => {
+const changePassword = async (req, res) => {
   try {
-    const { email, token, newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
 
-    if (!email || !token || !newPassword) {
-      return res.status(400).json({ success: false, message: "Email, reset code and new password are required." });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Current password and new password are required." });
     }
 
-    if (String(newPassword).length < 6) {
-      return res.status(400).json({ success: false, message: "Your new password must be at least 6 characters long." });
+    if (String(newPassword).length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Your new password must be at least ${PASSWORD_MIN_LENGTH} characters long.`
+      });
     }
 
-    const user = await User.findOne({
-      email: String(email).trim().toLowerCase(),
-      resetPasswordToken: hashCode(token),
-      resetPasswordExpires: { $gt: new Date() }
+    if (String(newPassword) === String(currentPassword)) {
+      return res.status(400).json({ success: false, message: "Your new password must be different from the current one." });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User account not found." });
+    }
+
+    const isMatch = await bcrypt.compare(String(currentPassword), user.passwordHash);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Your current password is incorrect." });
+    }
+
+    const passwordHash = await bcrypt.hash(String(newPassword), 10);
+    user.passwordHash = passwordHash;
+    await user.save();
+
+    await Member.updateOne({ email: user.email }, { passwordHash });
+
+    await safeAudit({
+      userId: user._id,
+      module: "Authentication",
+      action: "Password Changed",
+      newValue: "User changed their own password.",
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
     });
 
-    if (!user) {
-      return res.status(400).json({ success: false, message: "Invalid reset code, or the code has expired." });
+    return res.status(200).json({ success: true, message: "Your password has been changed successfully." });
+  } catch (error) {
+    console.error("changePassword error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/*
+|--------------------------------------------------------------------------
+| SELF-SERVICE PASSWORD CHANGE (no login needed, current password required)
+|--------------------------------------------------------------------------
+*/
+// Basic protection against password guessing: 8 wrong attempts per email locks this feature for 15 minutes
+const failedAttempts = new Map();
+const MAX_FAILED_ATTEMPTS = 8;
+const LOCK_WINDOW_MS = 15 * 60 * 1000;
+
+const isLockedOut = (key) => {
+  const entry = failedAttempts.get(key);
+  if (!entry) return false;
+  if (Date.now() > entry.resetAt) {
+    failedAttempts.delete(key);
+    return false;
+  }
+  return entry.count >= MAX_FAILED_ATTEMPTS;
+};
+
+const recordFailure = (key) => {
+  if (failedAttempts.size > 5000) {
+    for (const [k, v] of failedAttempts) {
+      if (Date.now() > v.resetAt) failedAttempts.delete(k);
+    }
+  }
+  const entry = failedAttempts.get(key);
+  if (!entry || Date.now() > entry.resetAt) {
+    failedAttempts.set(key, { count: 1, resetAt: Date.now() + LOCK_WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+};
+
+const LOCKED_MESSAGE = "Too many incorrect attempts. Please try again in 15 minutes.";
+const WRONG_CREDENTIALS_MESSAGE = "The email or current password is incorrect.";
+
+// Step 1: checks that the email + current password match
+const verifyCurrentPassword = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const currentPassword = String(req.body.currentPassword || "");
+
+    if (!email || !currentPassword) {
+      return res.status(400).json({ success: false, message: "Email and current password are required." });
     }
 
-    user.passwordHash = await bcrypt.hash(String(newPassword), 10);
+    if (isLockedOut(email)) {
+      return res.status(429).json({ success: false, message: LOCKED_MESSAGE });
+    }
+
+    const user = await User.findOne({ email });
+    const isMatch = user ? await bcrypt.compare(currentPassword, user.passwordHash) : false;
+
+    if (!isMatch) {
+      recordFailure(email);
+      return res.status(400).json({ success: false, message: WRONG_CREDENTIALS_MESSAGE });
+    }
+
+    return res.status(200).json({ success: true, message: "Current password confirmed." });
+  } catch (error) {
+    console.error("verifyCurrentPassword error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Step 2: sets the new password (the current password is checked again for safety)
+const changePasswordWithCurrent = async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const currentPassword = String(req.body.currentPassword || "");
+    const newPassword = String(req.body.newPassword || "");
+
+    if (!email || !currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Email, current password and new password are required." });
+    }
+
+    if (newPassword.length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Your new password must be at least ${PASSWORD_MIN_LENGTH} characters long.`
+      });
+    }
+
+    if (newPassword === currentPassword) {
+      return res.status(400).json({ success: false, message: "Your new password must be different from the current one." });
+    }
+
+    if (isLockedOut(email)) {
+      return res.status(429).json({ success: false, message: LOCKED_MESSAGE });
+    }
+
+    const user = await User.findOne({ email });
+    const isMatch = user ? await bcrypt.compare(currentPassword, user.passwordHash) : false;
+
+    if (!isMatch) {
+      recordFailure(email);
+      return res.status(400).json({ success: false, message: WRONG_CREDENTIALS_MESSAGE });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    user.passwordHash = passwordHash;
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
     await user.save();
 
-    await createAuditLog({
+    await Member.updateOne({ email: user.email }, { passwordHash });
+    failedAttempts.delete(email);
+
+    await safeAudit({
       userId: user._id,
       module: "Authentication",
-      action: "Password Reset Execution Successful",
-      newValue: "Password was reset using an emailed recovery code."
+      action: "Password Changed (Self-Service)",
+      newValue: "User changed their own password using their current password.",
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
     });
 
-    return res.status(200).json({
-      success: true,
-      message: "Your password has been updated successfully. You can now log in."
-    });
+    return res.status(200).json({ success: true, message: "Your password has been changed successfully. You can now log in." });
   } catch (error) {
-    console.error("resetPassword error:", error);
+    console.error("changePasswordWithCurrent error:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -319,6 +444,8 @@ module.exports = {
   register,
   login,
   getMe,
-  forgotPassword,
-  resetPassword
+  adminResetMemberPassword,
+  changePassword,
+  verifyCurrentPassword,
+  changePasswordWithCurrent
 };
