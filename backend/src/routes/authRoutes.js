@@ -3,10 +3,13 @@ const {
   register,
   login,
   getMe,
-  forgotPassword,
-  resetPassword
+  adminResetMemberPassword,
+  changePassword,
+  verifyCurrentPassword,
+  changePasswordWithCurrent
 } = require("../controllers/authController");
 const { protect } = require("../middlewares/authMiddleware");
+const authorize = require("../middlewares/roleMiddleware");
 
 const router = express.Router();
 
@@ -32,13 +35,27 @@ router.post("/login", login);
 
 /*
 |--------------------------------------------------------------------------
-| PASSWORD RECOVERY PIPELINES (Public Gateway Access)
+| SELF-SERVICE PASSWORD CHANGE (public: the member proves it is them with
+| their current password, so no login is needed)
 |--------------------------------------------------------------------------
-| These endpoints must remain unprotected by token guards so locked-out 
-| users can transmit account recovery signatures to get new system keys.
 */
-router.post("/forgot-password", forgotPassword);
-router.post("/reset-password", resetPassword);
+router.post("/verify-password", verifyCurrentPassword);
+router.post("/change-password-with-current", changePasswordWithCurrent);
+
+/*
+|--------------------------------------------------------------------------
+| PASSWORD MANAGEMENT
+|--------------------------------------------------------------------------
+| - Any logged-in user can change their own password.
+| - Only SuperAdmin / MembershipAdmin can generate a temporary password for a member.
+*/
+router.post("/change-password", protect, changePassword);
+router.post(
+  "/admin-reset-password",
+  protect,
+  authorize("SuperAdmin", "MembershipAdmin"),
+  adminResetMemberPassword
+);
 
 /*
 |--------------------------------------------------------------------------
