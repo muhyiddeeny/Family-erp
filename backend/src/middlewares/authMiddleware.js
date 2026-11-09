@@ -1,74 +1,21 @@
-// const jwt = require("jsonwebtoken");
-// const User = require("../models/User");
-
-// const protect = async (req, res, next) => {
-//   try {
-//     let token;
-
-//     if (
-//       req.headers.authorization &&
-//       req.headers.authorization.startsWith("Bearer ")
-//     ) {
-//       token = req.headers.authorization.split(" ")[1];
-//     }
-
-//     if (!token) {
-//       return res.status(401).json({
-//         success: false,
-//         message: "Authentication required: Missing access token"
-//       });
-//     }
-
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | BALANCED TARGET LOOKUP LAYER (Fixes lookup key and credential leak bugs)
-//     |--------------------------------------------------------------------------
-//     | Fallback checking logic reads both 'userId' and 'id' payload property options.
-//     | Changing select parameter to '-passwordHash' explicitly filters out credentials.
-//     */
-//     const lookupId = decoded.userId || decoded.id;
-//     const user = await User.findById(lookupId).select("-passwordHash");
-
-//     if (!user) {
-//       return res.status(401).json({
-//         success: false,
-//         message: "Authentication failed: Authorized profile no longer exists"
-//       });
-//     }
-
-//     // Attach the clean user profile record block securely to the running threat
-//     req.user = user;
-
-//     next();
-//   } catch (error) {
-//     return res.status(401).json({
-//       success: false,
-//       message: "Access token is invalid or expired"
-//     });
-//   }
-// };
-
-// module.exports = {
-//   protect
-// };
-
-
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
+const extractToken = (req) => {
+  if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+    return req.headers.authorization.split(" ")[1];
+  }
+  return null;
+};
+
+/*
+|--------------------------------------------------------------------------
+| PROTECT: the request must carry a valid token
+|--------------------------------------------------------------------------
+*/
 const protect = async (req, res, next) => {
   try {
-    let token;
-
-    if (
-      req.headers.authorization &&
-      req.headers.authorization.startsWith("Bearer ")
-    ) {
-      // FIX: Added the [1] array index back so the actual token string is extracted cleanly
-      token = req.headers.authorization.split(" ")[1]; 
-    }
+    const token = extractToken(req);
 
     if (!token) {
       return res.status(401).json({
@@ -89,7 +36,7 @@ const protect = async (req, res, next) => {
     }
 
     req.user = user;
-    next(); 
+    next();
   } catch (error) {
     return res.status(401).json({
       success: false,
@@ -98,4 +45,25 @@ const protect = async (req, res, next) => {
   }
 };
 
-module.exports = { protect };
+/*
+|--------------------------------------------------------------------------
+| OPTIONAL PROTECT: never blocks the request.
+| If a valid token is sent, req.user is filled in; otherwise the request
+| continues as an anonymous visitor.
+|--------------------------------------------------------------------------
+*/
+const optionalProtect = async (req, res, next) => {
+  try {
+    const token = extractToken(req);
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId || decoded.id).select("-passwordHash");
+      if (user) req.user = user;
+    }
+  } catch (error) {
+    // Invalid or expired token: continue as an anonymous visitor
+  }
+  next();
+};
+
+module.exports = { protect, optionalProtect };
