@@ -37,24 +37,32 @@ const createHouse = async (req, res) => {
   }
 };
 
+const ADMIN_ROLES = ["Admin", "SuperAdmin", "MembershipAdmin", "HouseAdmin"];
+
 const getAllHouses = async (req, res) => {
   try {
     let houses = await House.find().populate("members", "firstName surname email role");
 
-    const userRole = req.user?.role;
-    const isAdmin = userRole === "Admin" || userRole === "SuperAdmin" || userRole === "HouseAdmin";
+    const isAdmin = ADMIN_ROLES.includes(req.user?.role);
 
     if (!isAdmin) {
-      const targetMemberId = req.user?._id || req.query.memberId;
+      // Find which house (if any) belongs to the logged-in member
       let assignedHouseId = null;
-
-      if (targetMemberId) {
-        const memberProfile = await Member.findById(targetMemberId);
-        assignedHouseId = memberProfile?.houseId?.toString();
+      if (req.user) {
+        let memberProfile = await Member.findOne({ email: String(req.user.email || "").toLowerCase() });
+        if (!memberProfile && req.user.username) {
+          memberProfile = await Member.findOne({ username: req.user.username });
+        }
+        assignedHouseId = memberProfile?.houseId?.toString() || null;
       }
 
       houses = houses.map((house) => {
         const houseObj = house.toObject();
+
+        // Visitors and members never receive other people's names or emails
+        houseObj.members = (houseObj.members || []).map((m) => m._id);
+
+        // The private WhatsApp link is only for members of that house
         if (!assignedHouseId || houseObj._id.toString() !== assignedHouseId) {
           delete houseObj.whatsappCommunityLink;
         }
