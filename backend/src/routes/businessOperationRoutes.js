@@ -2,15 +2,19 @@ const express = require("express");
 const {
   createOperation,
   getOperations,
-  getBusinessSummary
+  getBusinessSummary,
+  updateOperation,
+  deleteOperation
 } = require("../controllers/businessOperationController");
 const {
   createUpdate,
-  getUpdates
+  getUpdates,
+  updateUpdate,
+  deleteUpdate
 } = require("../controllers/businessUpdateController");
 
-const { protect } = require("../middlewares/authMiddleware"); // Import token validation
-const authorize = require("../middlewares/roleMiddleware"); // Import role validation
+const { protect } = require("../middlewares/authMiddleware");
+const authorize = require("../middlewares/roleMiddleware");
 
 const router = express.Router();
 
@@ -18,16 +22,21 @@ const router = express.Router();
 |--------------------------------------------------------------------------
 | FINANCIAL & OPERATION LOGS (SuperAdmin & BusinessAdmin Only)
 |--------------------------------------------------------------------------
-| Logging revenues, expenses, profits, or losses is highly restricted.
+| Revenue, expenses, profit, loss and business updates.
+| Every record must belong to a category and a project.
 */
 router.post("/operations", protect, authorize("SuperAdmin", "BusinessAdmin"), createOperation);
+router.put("/operations/:id", protect, authorize("SuperAdmin", "BusinessAdmin"), updateOperation);
+router.delete("/operations/:id", protect, authorize("SuperAdmin", "BusinessAdmin"), deleteOperation);
+
 router.post("/updates", protect, authorize("SuperAdmin", "BusinessAdmin"), createUpdate);
+router.put("/updates/:id", protect, authorize("SuperAdmin", "BusinessAdmin"), updateUpdate);
+router.delete("/updates/:id", protect, authorize("SuperAdmin", "BusinessAdmin"), deleteUpdate);
 
 /*
 |--------------------------------------------------------------------------
 | READ-ONLY & VISUAL DATA FEEDS (All Authenticated Members)
 |--------------------------------------------------------------------------
-| Regular family members can view updates and financial summaries on their dashboards.
 */
 router.get("/operations", protect, getOperations);
 router.get("/summary", protect, getBusinessSummary);
