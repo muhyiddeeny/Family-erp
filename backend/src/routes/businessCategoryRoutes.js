@@ -6,17 +6,21 @@ const {
   updateCategory,
   deleteCategory
 } = require("../controllers/businessCategoryController");
-const { protect } = require("../middlewares/authMiddleware"); // Import your security protection middleware
-const authorize = require("../middlewares/roleMiddleware"); // Import your role checking middleware
+const { protect } = require("../middlewares/authMiddleware");
+const authorize = require("../middlewares/roleMiddleware");
+const ensureDefaultCategories = require("../utils/ensureDefaultCategories");
 
 const router = express.Router();
 
 /*
 |--------------------------------------------------------------------------
-| PUBLIC ADMIN READ OPERATIONS (Protected by Session Token)
+| READ OPERATIONS (Protected by Session Token)
+| The first request after a server start also makes sure the 6 standard
+| categories exist: Farming, Livestock, Transportation, Trading,
+| Real Estate and Others.
 |--------------------------------------------------------------------------
 */
-router.get("/", protect, getCategories);
+router.get("/", protect, ensureDefaultCategories, getCategories);
 router.get("/:id", protect, getCategoryById);
 
 /*
