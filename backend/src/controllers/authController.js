@@ -3,7 +3,12 @@ const crypto = require("crypto");
 const User = require("../models/User");
 const Member = require("../models/Member");
 const Role = require("../models/Role"); 
+const SystemSetting = require("../models/SystemSetting");
 const generateToken = require("../utils/generateToken");
+const {
+  DEFAULT_PASSWORD_KEY,
+  FALLBACK_DEFAULT_PASSWORD
+} = require("../utils/defaultPassword");
 const { createAuditLog } = require("./auditLogController"); 
 
 /*
@@ -440,6 +445,95 @@ const changePasswordWithCurrent = async (req, res) => {
   }
 };
 
+/*
+|--------------------------------------------------------------------------
+| DEFAULT PASSWORD FOR NEW MEMBERS (SuperAdmin / MembershipAdmin only)
+|--------------------------------------------------------------------------
+| This is the temporary password given to every member approved from now on.
+| Existing members keep whatever password they already have.
+*/
+const getDefaultPasswordSetting = async (req, res) => {
+  try {
+    const setting = await SystemSetting.findOne({ key: DEFAULT_PASSWORD_KEY }).lean();
+
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({
+      success: true,
+      defaultPassword: setting?.value || FALLBACK_DEFAULT_PASSWORD,
+      isCustom: Boolean(setting?.value),
+      updatedAt: setting?.updatedAt || null
+    });
+  } catch (error) {
+    console.error("getDefaultPasswordSetting error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const updateDefaultPasswordSetting = async (req, res) => {
+  try {
+    // Go back to the built-in default
+    if (req.body.reset === true) {
+      await SystemSetting.deleteOne({ key: DEFAULT_PASSWORD_KEY });
+
+      await safeAudit({
+        userId: req.user?._id,
+        module: "Authentication",
+        action: "Default Password Reset To Built-in Value",
+        newValue: "The default password for new members was reset to the built-in value.",
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"]
+      });
+
+      res.set("Cache-Control", "no-store");
+      return res.status(200).json({
+        success: true,
+        message: "The default password was reset to the built-in value.",
+        defaultPassword: FALLBACK_DEFAULT_PASSWORD,
+        isCustom: false
+      });
+    }
+
+    const password = String(req.body.password ?? "");
+
+    if (password !== password.trim()) {
+      return res.status(400).json({ success: false, message: "The password must not start or end with a space." });
+    }
+
+    if (password.length < PASSWORD_MIN_LENGTH || password.length > 64) {
+      return res.status(400).json({
+        success: false,
+        message: `The default password must be between ${PASSWORD_MIN_LENGTH} and 64 characters long.`
+      });
+    }
+
+    await SystemSetting.findOneAndUpdate(
+      { key: DEFAULT_PASSWORD_KEY },
+      { value: password, updatedBy: req.user?._id || null },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    await safeAudit({
+      userId: req.user?._id,
+      module: "Authentication",
+      action: "Default Password Changed",
+      newValue: "The default password for new members was changed.",
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"]
+    });
+
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({
+      success: true,
+      message: "Default password saved. It applies to members approved from now on.",
+      defaultPassword: password,
+      isCustom: true
+    });
+  } catch (error) {
+    console.error("updateDefaultPasswordSetting error:", error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -447,5 +541,7 @@ module.exports = {
   adminResetMemberPassword,
   changePassword,
   verifyCurrentPassword,
-  changePasswordWithCurrent
+  changePasswordWithCurrent,
+  getDefaultPasswordSetting,
+  updateDefaultPasswordSetting
 };
