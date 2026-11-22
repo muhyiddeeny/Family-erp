@@ -6,7 +6,9 @@ const {
   adminResetMemberPassword,
   changePassword,
   verifyCurrentPassword,
-  changePasswordWithCurrent
+  changePasswordWithCurrent,
+  getDefaultPasswordSetting,
+  updateDefaultPasswordSetting
 } = require("../controllers/authController");
 const { protect } = require("../middlewares/authMiddleware");
 const authorize = require("../middlewares/roleMiddleware");
@@ -48,6 +50,8 @@ router.post("/change-password-with-current", changePasswordWithCurrent);
 |--------------------------------------------------------------------------
 | - Any logged-in user can change their own password.
 | - Only SuperAdmin / MembershipAdmin can generate a temporary password for a member.
+| - Only SuperAdmin / MembershipAdmin can view or change the default password
+|   given to newly approved members.
 */
 router.post("/change-password", protect, changePassword);
 router.post(
@@ -55,6 +59,18 @@ router.post(
   protect,
   authorize("SuperAdmin", "MembershipAdmin"),
   adminResetMemberPassword
+);
+router.get(
+  "/default-password",
+  protect,
+  authorize("SuperAdmin", "MembershipAdmin"),
+  getDefaultPasswordSetting
+);
+router.put(
+  "/default-password",
+  protect,
+  authorize("SuperAdmin", "MembershipAdmin"),
+  updateDefaultPasswordSetting
 );
 
 /*
