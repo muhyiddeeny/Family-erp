@@ -7,8 +7,6 @@ const { protect } = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
-const ADMIN_ROLES = ["SuperAdmin", "MembershipAdmin", "BusinessAdmin", "DonationAdmin", "HouseAdmin"];
-
 // Makes sure a saved WhatsApp link always opens correctly (adds https:// when missing)
 const normalizeLink = (link) => {
   const text = String(link || "").trim();
@@ -49,16 +47,14 @@ router.get("/member-summary", protect, async (req, res) => {
     };
 
     if (!memberDetails) {
-      // Admins without a member profile can still open User Mode (with empty personal data)
-      if (ADMIN_ROLES.includes(userProfile.role)) {
-        return res.status(200).json({
-          success: true,
-          user: userPayload,
-          member: {},
-          noMemberProfile: true
-        });
-      }
-      return res.status(404).json({ success: false, message: "Member demographic records not found inside collections." });
+      // Anyone without a member profile (for example an account created directly by the SuperAdmin,
+      // or a former sub-admin whose role was revoked) can still open the dashboard with empty personal data
+      return res.status(200).json({
+        success: true,
+        user: userPayload,
+        member: {},
+        noMemberProfile: true
+      });
     }
 
     const member = memberDetails.toObject();
